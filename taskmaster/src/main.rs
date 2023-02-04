@@ -54,7 +54,7 @@ impl Job {
                 "starttime" => job.starttime = v.as_i64().unwrap() as usize,
                 "stopsignal" => job.stopsignal = v.as_str().unwrap().to_owned(),
                 "stoptime" => job.stoptime = v.as_i64().unwrap() as usize,
-                _ => {/* Err("Unknown field")*/},
+                _ => {/* Err("Unknown field") */},
             }
         }
         println!("{:?}", job);
