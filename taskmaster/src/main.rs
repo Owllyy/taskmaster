@@ -16,14 +16,4 @@ fn main() {
     });
     taskmaster.execute();
     //taskmaster.monitor();
-    
-    let mut command = String::new();
-    loop {
-        io::stdin().read_line(& mut command).expect("Failed to read input");
-        match command.as_str() {
-            "status" => check_status(),
-            "help" => display_commands(),
-            _ => println!("Unknown command, type \"help\" to show all commands"),
-        }
-    }
 }
