@@ -1,7 +1,8 @@
+use std::fmt::format;
 use std::{fs, default};
 use std::fs::File;
 use std::io::{self, Read};
-use std::process::{Command, Child, Stdio};
+use std::process::{self, Command, Child, Stdio};
 use serde::Deserialize;
 use std::error::Error;
 use std::collections::HashMap;
@@ -101,18 +102,16 @@ struct Task {
 }
 
 enum Instruction {
-    Exit,
     Status,
     Start(String),
     Stop(String),
-    Restart(String),
-    Unknown,
+    Restart(String)
 }
 
 #[derive(Deserialize)]
 pub struct Taskmaster {
     #[serde(skip)]
-    procs: Mutex<Vec<Processus>>,
+    procs: Vec<Mutex<Processus>>,
     #[serde(skip)]
     logger: Logger,
     #[serde(flatten)]
@@ -125,36 +124,74 @@ impl Taskmaster {
 
     pub fn executioner(&self) -> Result<(), Box<dyn Error>> {
         loop {
-            let queue = self.workQ.lock().expect("Mutex Lock failed");
+            let mut queue = self.workQ.lock().expect("Mutex Lock failed");
 
             if let Some(instruction) = queue.pop() {
                 match instruction {
                     Instruction::Status => self.status(),
-                    Instruction::Start(task) => start(task),
-                    Instruction::Stop(task) => stop(task),
-                    Instruction::Restart(task) => restart(task),
-                    _ => {},
+                    Instruction::Start(task) => unimplemented!(),
+                    Instruction::Stop(task) => unimplemented!(),
+                    Instruction::Restart(task) => unimplemented!(),
                 }
             }
         }
-        Ok(())
     }
 
     fn status(&self) {
-        let procs = self.procs.lock().expect("Mutex Lock Failed");
+        println!("{:-<55}", "-");
+        println!("| {:^5} | {:^20} | {:^20} |", "ID", "NAME", "STATUS");
+        println!("{:-<55}", "-");
+        for processus in self.procs.iter() {
+            let mut proc = processus.lock().expect("Mutex Lock failed");
+            if let Some(child) = proc.child.as_mut() {
+                let status = match child.try_wait() {
+                    Ok(Some(st)) => format!("{st}"),
+                    Ok(None) => "active".to_owned(),
+                    Err(_) => "error".to_owned(),
+                };
+                println!("| {:^5} | {:^20} | {:^20} |", proc.id, proc.name.chars().take(20).collect::<String>(), status);
+            } else {
+                println!("| {:^5} | {:^20} | {:^20} |", proc.id, proc.name.chars().take(20).collect::<String>(), "inactive");
+            }
+        }
+        println!("{:-<55}", "-");
+    }
 
-        for processus in procs.iter() {
-            processus.child
+    fn start(&mut self, name: String) {
+        for proc in self.procs.iter() {
+            let mut proc = proc.lock().expect("Mutex Lock failed");
+            if let Some(child) = proc.child.as_mut() {
+                match child.try_wait() {
+                    Ok(Some(_)) => {
+                        proc.child = Some(self.config
+                            .get_mut(&name).unwrap()
+                            .command.as_mut().unwrap()
+                            .spawn().expect("Failed to spawn proc"));
+                    },
+                    Ok(None) => {
+                        println!("The program is already running");
+                    }
+                    Err(_) => {
+                        panic!("try wait failed");
+                    },
+                };
+            } else {
+                if let Some(task) = self.config.get_mut(&name) {
+                    proc.child = Some(task.command.as_mut().unwrap().spawn().expect("Failed to spawn proc"));
+                } else {
+                    println!("Unknown Program");
+                }
+            }
         }
     }
 
     pub fn build(file_path: &str) -> Result<Self, Box<dyn Error>> {
-        let commands: Vec<Processus> = vec!();
+        let commands: Vec<Mutex<Processus>> = vec!();
         let config = fs::read_to_string(file_path)?;
         let config: HashMap<String, Task> = serde_yaml::from_str(&config)?;
 
         Ok(Taskmaster {
-            procs: Mutex::new(commands),
+            procs: commands,
             logger: Logger::new("taskmaster.log"),
             config,
             workQ: Mutex::new(Vec::new())
@@ -162,16 +199,17 @@ impl Taskmaster {
     }
 
     pub fn execute(& mut self) -> Result<(), Box<dyn Error>> {
+        let mut i = 0;
         for (name, properties) in self.config.iter_mut() {
 
             Self::build_command(properties)?;
-            
-            let procs = self.procs.lock().expect("Mutex lock failed");
 
             for id in 0..properties.numprocs {
-                procs.push(Processus::build(id, name, properties.startretries));
+                self.procs.push(Mutex::new(Processus::build(i + id, name, properties.startretries)));
             }
+            i += properties.numprocs;
         }
+        self.cli();
         Ok(())
     }
 
@@ -199,22 +237,47 @@ impl Taskmaster {
     fn cli(&mut self) {
         let mut buff = String::new();
         loop {
+            buff.clear();
             io::stdin().read_line(&mut buff).expect("Failed to read");
             let input: Vec<&str> = buff.split_whitespace().collect();
             if let Some(instruct) = input.get(0) {
-                match instruct {
-                    "exit" => unimplemented!("exit"),
+                match instruct.to_lowercase().as_str() {
+                    "exit" => {
+                        process::exit(0);
+                    }
                     "status" => {
-                        let queue = self.workQ.lock().expect("Mutex Lock failed");
-                        queue.push(Instruction::Status)
+                        let mut queue = self.workQ.lock().expect("Mutex Lock failed");
+                        self.status();
+                        queue.push(Instruction::Status);
                     }
                     "start" => {
-                        let queue = self.workQ.lock().expect("Mutex Lock failed");
-                        // queue.push(Instruction::Start(instruct.next()))
-                    },
-                    "stop" => unimplemented!(),
-                    "restart" => unimplemented!(),
-                    _ => unimplemented!(),
+                        if let Some(arg) = input.get(1) {
+                            self.start(arg.to_string());
+                            let mut queue = self.workQ.lock().expect("Mutex Lock failed");
+                            queue.push(Instruction::Start(arg.to_string()));
+                        } else {
+                            println!("Which program you want to start ? ($ start nginx)");
+                        }
+                    }
+                    "stop" => {
+                        if let Some(arg) = input.get(1) {
+                            let mut queue = self.workQ.lock().expect("Mutex Lock failed");
+                            queue.push(Instruction::Stop(arg.to_string()));
+                        } else {
+                            println!("Which program you want to stop ? ($ stop nginx)");
+                        }
+                    }
+                    "restart" => {
+                        if let Some(arg) = input.get(1) {
+                            let mut queue = self.workQ.lock().expect("Mutex Lock failed");
+                            queue.push(Instruction::Restart(arg.to_string()));
+                        } else {
+                            println!("Which program you want to restart ? ($ restart nginx)");
+                        }
+                    }
+                    _ => {
+                        println!("Unknown command");
+                    }
                 }
             }
         }
