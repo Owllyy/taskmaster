@@ -103,9 +103,9 @@ struct Task {
 
 enum Instruction {
     Status,
-    Start(String),
-    Stop(String),
-    Restart(String)
+    Start(Vec<String>),
+    Stop(Vec<String>),
+    Restart(Vec<String>)
 }
 
 #[derive(Deserialize)]
@@ -117,21 +117,21 @@ pub struct Taskmaster {
     #[serde(flatten)]
     config: HashMap<String, Task>,
     #[serde(skip)]
-    workQ: Mutex<Vec<Instruction>>,
+    work_q: Mutex<Vec<Instruction>>,
 }
 
 impl Taskmaster {
 
-    pub fn executioner(&self) -> Result<(), Box<dyn Error>> {
+    pub fn executioner(&mut self) -> Result<(), Box<dyn Error>> {
         loop {
-            let mut queue = self.workQ.lock().expect("Mutex Lock failed");
+            let mut queue = self.work_q.get_mut().expect("Mutex Lock failed");
 
             if let Some(instruction) = queue.pop() {
                 match instruction {
                     Instruction::Status => self.status(),
-                    Instruction::Start(task) => unimplemented!(),
-                    Instruction::Stop(task) => unimplemented!(),
-                    Instruction::Restart(task) => unimplemented!(),
+                    Instruction::Start(task) => self.start(task),
+                    Instruction::Stop(task) => self.stop(task),
+                    Instruction::Restart(task) => self.restart(task),
                 }
             }
         }
@@ -157,32 +157,92 @@ impl Taskmaster {
         println!("{:-<55}", "-");
     }
 
-    fn start(&mut self, name: String) {
-        for proc in self.procs.iter() {
-            let mut proc = proc.lock().expect("Mutex Lock failed");
-            if let Some(child) = proc.child.as_mut() {
-                match child.try_wait() {
-                    Ok(Some(_)) => {
-                        proc.child = Some(self.config
-                            .get_mut(&name).unwrap()
-                            .command.as_mut().unwrap()
-                            .spawn().expect("Failed to spawn proc"));
-                    },
-                    Ok(None) => {
-                        println!("The program is already running");
-                    }
-                    Err(_) => {
-                        panic!("try wait failed");
-                    },
-                };
-            } else {
-                if let Some(task) = self.config.get_mut(&name) {
-                    proc.child = Some(task.command.as_mut().unwrap().spawn().expect("Failed to spawn proc"));
+    fn start(&mut self, name: Vec<String>) {
+        for name in name {
+            for proc in self.procs.iter() {
+                let mut proc = proc.lock().expect("Mutex Lock failed");
+                if let Some(child) = proc.child.as_mut() {
+                    match child.try_wait() {
+                        Ok(Some(_)) => {
+                            proc.child = Some(self.config
+                                .get_mut(&name).unwrap()
+                                .command.as_mut().unwrap()
+                                .spawn().expect("Failed to spawn proc"));
+                        },
+                        Ok(None) => {
+                            println!("The program is already running");
+                        }
+                        Err(_) => {
+                            panic!("try wait failed");
+                        },
+                    };
                 } else {
-                    println!("Unknown Program");
+                    if let Some(task) = self.config.get_mut(&name) {
+                        proc.child = Some(task.command.as_mut().expect("Can't spawn command").spawn().expect("Failed to spawn proc"));
+                    } else {
+                        println!("Unknown Program");
+                    }
                 }
             }
         }
+    }
+
+    fn stop(&mut self, name: Vec<String>) {
+        for name in name {
+            for proc in self.procs.iter() {
+                let mut proc = proc.lock().expect("Mutex Lock failed");
+                if let Some(child) = proc.child.as_mut() {
+                    match child.try_wait() {
+                        Ok(Some(exitstatus)) => {
+                            println!("The program {name} as stoped running, exit code : {exitstatus}");
+                        },
+                        Ok(None) => {
+                            // May be illegal to use the Linux command Kill to send Signal to child process
+                            // If not switch to LibC way of sending signal
+                            match Command::new("kill")
+                                // TODO: replace `TERM` to signal you want.
+                                .args(["-s", &self.config.get(&name).unwrap().stopsignal, &child.id().to_string()])
+                                .spawn() {
+                                    Ok(_) => {},
+                                    Err(e) => panic!("Fail to send the stop signal : {e}"),
+                                }
+                        }
+                        Err(_) => {
+                            panic!("try_wait() failed");
+                        },
+                    };
+                } else {
+                    if let Some(task) = self.config.get_mut(&name) {
+                        println!("The program {name} is not running");
+                    } else {
+                        println!("Unknown Program");
+                    }
+                }
+            }
+        }
+    }
+
+    fn restart(&mut self, name: Vec<String>) {
+        self.stop(name.to_owned());
+        self.start(name);
+    }
+
+    fn start_all(&mut self) {
+        let mut all_task = Vec::new();
+        for (name, task) in &self.config {
+            if (task.autostart) {
+                all_task.push(name.to_owned());
+            }
+        }
+        self.start(all_task);
+    }
+
+    fn stop_all(&mut self) {
+        let mut all_task = Vec::new();
+        for (name, _) in &self.config {
+            all_task.push(name.to_owned());
+        }
+        self.stop(all_task);
     }
 
     pub fn build(file_path: &str) -> Result<Self, Box<dyn Error>> {
@@ -194,7 +254,7 @@ impl Taskmaster {
             procs: commands,
             logger: Logger::new("taskmaster.log"),
             config,
-            workQ: Mutex::new(Vec::new())
+            work_q: Mutex::new(Vec::new())
         })
     }
 
@@ -209,6 +269,7 @@ impl Taskmaster {
             }
             i += properties.numprocs;
         }
+        self.start_all();
         self.cli();
         Ok(())
     }
@@ -246,31 +307,31 @@ impl Taskmaster {
                         process::exit(0);
                     }
                     "status" => {
-                        let mut queue = self.workQ.lock().expect("Mutex Lock failed");
+                        let mut queue = self.work_q.lock().expect("Mutex Lock failed");
                         self.status();
                         queue.push(Instruction::Status);
                     }
                     "start" => {
                         if let Some(arg) = input.get(1) {
-                            self.start(arg.to_string());
-                            let mut queue = self.workQ.lock().expect("Mutex Lock failed");
-                            queue.push(Instruction::Start(arg.to_string()));
+                            self.start(vec![arg.to_string()]);
+                            let mut queue = self.work_q.lock().expect("Mutex Lock failed");
+                            queue.push(Instruction::Start(vec![arg.to_string()]));
                         } else {
                             println!("Which program you want to start ? ($ start nginx)");
                         }
                     }
                     "stop" => {
                         if let Some(arg) = input.get(1) {
-                            let mut queue = self.workQ.lock().expect("Mutex Lock failed");
-                            queue.push(Instruction::Stop(arg.to_string()));
+                            let mut queue = self.work_q.lock().expect("Mutex Lock failed");
+                            queue.push(Instruction::Stop(vec![arg.to_string()]));
                         } else {
                             println!("Which program you want to stop ? ($ stop nginx)");
                         }
                     }
                     "restart" => {
                         if let Some(arg) = input.get(1) {
-                            let mut queue = self.workQ.lock().expect("Mutex Lock failed");
-                            queue.push(Instruction::Restart(arg.to_string()));
+                            let mut queue = self.work_q.lock().expect("Mutex Lock failed");
+                            queue.push(Instruction::Restart(vec![arg.to_string()]));
                         } else {
                             println!("Which program you want to restart ? ($ restart nginx)");
                         }

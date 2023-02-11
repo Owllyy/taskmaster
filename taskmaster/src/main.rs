@@ -10,7 +10,7 @@ fn display_commands() {
 }
 
 fn main() {
-    let mut taskmaster: Taskmaster = Taskmaster::build("template.conf").unwrap_or_else(|err| {
+    let mut taskmaster: Taskmaster = Taskmaster::build("simple.conf").unwrap_or_else(|err| {
         eprintln!("Taskmaster: {err}");
         process::exit(1);
     });
