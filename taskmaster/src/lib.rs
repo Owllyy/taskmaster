@@ -163,7 +163,7 @@ impl Taskmaster {
         println!("{:-<55}", "-");
     }
 
-    fn start(procs: &Arc<Mutex<Vec<Processus>>>, mut config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>) {
+    fn start(procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>) {
         let procs = procs.lock().expect("Fail to lock Mutex");
         let config = config.lock().expect("Fail to lock Mutex");
         for name in names {
@@ -193,10 +193,11 @@ impl Taskmaster {
         }
     }
 
-    fn stop(&mut self, name: Vec<String>) {
-        for name in name {
-            for proc in self.procs.iter() {
-                let mut proc = proc.lock().expect("Mutex Lock failed");
+    fn stop(procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>) {
+        let procs = procs.lock().expect("Fail to lock Mutex");
+        let config = config.lock().expect("Fail to lock Mutex");
+        for name in names {
+            for proc in procs.iter() {
                 if let Some(child) = proc.child.as_mut() {
                     match child.try_wait() {
                         Ok(Some(exitstatus)) => {
@@ -207,7 +208,7 @@ impl Taskmaster {
                             // If not switch to LibC way of sending signal
                             match Command::new("kill")
                                 // TODO: replace `TERM` to signal you want.
-                                .args(["-s", &self.config.get(&name).unwrap().stopsignal, &child.id().to_string()])
+                                .args(["-s", &config.get(&name).unwrap().stopsignal, &child.id().to_string()])
                                 .spawn() {
                                     Ok(_) => {},
                                     Err(e) => panic!("Fail to send the stop signal : {e}"),
@@ -218,7 +219,7 @@ impl Taskmaster {
                         },
                     };
                 } else {
-                    if let Some(task) = self.config.get_mut(&name) {
+                    if let Some(task) = config.get_mut(&name) {
                         println!("The program {name} is not running");
                     } else {
                         println!("Unknown Program");
@@ -228,10 +229,10 @@ impl Taskmaster {
         }
     }
 
-    // fn restart(&mut self, name: Vec<String>) {
-    //     self.stop(name.to_owned());
-    //     Taskmaster::start(name);
-    // }
+    fn restart(procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>) {
+        Taskmaster::stop(procs, config, names.to_owned());
+        Taskmaster::start(procs, config, names);
+    }
 
     // fn start_all(&mut self) {
     //     let mut all_task = Vec::new();
