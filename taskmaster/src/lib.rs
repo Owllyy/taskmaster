@@ -7,8 +7,8 @@ use serde::Deserialize;
 use std::error::Error;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use std::thread::sleep;
-use std::sync::Mutex;
+use std::thread::{self, sleep};
+use std::sync::{Mutex, Arc};
 
 #[allow(non_camel_case_types)]
 type mode_t = u32;
@@ -111,37 +111,44 @@ enum Instruction {
 #[derive(Deserialize)]
 pub struct Taskmaster {
     #[serde(skip)]
-    procs: Vec<Mutex<Processus>>,
+    procs: Vec<Arc<Mutex<Processus>>>,
     #[serde(skip)]
     logger: Logger,
     #[serde(flatten)]
     config: HashMap<String, Task>,
     #[serde(skip)]
-    work_q: Mutex<Vec<Instruction>>,
+    work_q: Arc<Mutex<Vec<Instruction>>>,
 }
 
 impl Taskmaster {
 
-    pub fn executioner(&mut self) -> Result<(), Box<dyn Error>> {
-        loop {
-            let mut queue = self.work_q.get_mut().expect("Mutex Lock failed");
-
-            if let Some(instruction) = queue.pop() {
-                match instruction {
-                    Instruction::Status => self.status(),
-                    Instruction::Start(task) => self.start(task),
-                    Instruction::Stop(task) => self.stop(task),
-                    Instruction::Restart(task) => self.restart(task),
+    pub fn executioner(work_q: &Arc<Mutex<Vec<Instruction>>>, procs: &Vec<Arc<Mutex<Processus>>>) {
+        let mut arc_proc: Vec<Arc<Mutex<Processus>>> = vec![];
+        for proc in procs.iter() {
+            arc_proc.push(Arc::clone(&proc));
+        }
+        let work_q = Arc::clone(&work_q);
+        thread::spawn(move || {
+            loop {
+                let mut queue = work_q.get_mut().expect("Mutex Lock failed");
+    
+                if let Some(instruction) = queue.pop() {
+                    match instruction {
+                        Instruction::Status => Taskmaster::status(&arc_proc),
+                        Instruction::Start(task) => Taskmaster::start(&arc_proc, task),
+                        Instruction::Stop(task) => self.stop(task),
+                        Instruction::Restart(task) => self.restart(task),
+                    }
                 }
             }
-        }
+        });
     }
 
-    fn status(&self) {
+    fn status(procs: &Vec<Arc<Mutex<Processus>>>) {
         println!("{:-<55}", "-");
         println!("| {:^5} | {:^20} | {:^20} |", "ID", "NAME", "STATUS");
         println!("{:-<55}", "-");
-        for processus in self.procs.iter() {
+        for processus in procs.iter() {
             let mut proc = processus.lock().expect("Mutex Lock failed");
             if let Some(child) = proc.child.as_mut() {
                 let status = match child.try_wait() {
@@ -157,14 +164,14 @@ impl Taskmaster {
         println!("{:-<55}", "-");
     }
 
-    fn start(&mut self, name: Vec<String>) {
-        for name in name {
-            for proc in self.procs.iter() {
+    fn start(procs: &Vec<Arc<Mutex<Processus>>>, mut config: &HashMap<String, Task>, names: Vec<String>) {
+        for name in names {
+            for proc in procs.iter() {
                 let mut proc = proc.lock().expect("Mutex Lock failed");
                 if let Some(child) = proc.child.as_mut() {
                     match child.try_wait() {
                         Ok(Some(_)) => {
-                            proc.child = Some(self.config
+                            proc.child = Some(config
                                 .get_mut(&name).unwrap()
                                 .command.as_mut().unwrap()
                                 .spawn().expect("Failed to spawn proc"));
@@ -177,7 +184,7 @@ impl Taskmaster {
                         },
                     };
                 } else {
-                    if let Some(task) = self.config.get_mut(&name) {
+                    if let Some(task) = config.get_mut(&name) {
                         proc.child = Some(task.command.as_mut().expect("Can't spawn command").spawn().expect("Failed to spawn proc"));
                     } else {
                         println!("Unknown Program");
@@ -246,7 +253,7 @@ impl Taskmaster {
     }
 
     pub fn build(file_path: &str) -> Result<Self, Box<dyn Error>> {
-        let commands: Vec<Mutex<Processus>> = vec!();
+        let commands: Vec<Arc<Mutex<Processus>>> = vec!();
         let config = fs::read_to_string(file_path)?;
         let config: HashMap<String, Task> = serde_yaml::from_str(&config)?;
 
@@ -254,7 +261,7 @@ impl Taskmaster {
             procs: commands,
             logger: Logger::new("taskmaster.log"),
             config,
-            work_q: Mutex::new(Vec::new())
+            work_q: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
@@ -265,7 +272,7 @@ impl Taskmaster {
             Self::build_command(properties)?;
 
             for id in 0..properties.numprocs {
-                self.procs.push(Mutex::new(Processus::build(i + id, name, properties.startretries)));
+                self.procs.push(Arc::new(Mutex::new(Processus::build(i + id, name, properties.startretries))));
             }
             i += properties.numprocs;
         }
