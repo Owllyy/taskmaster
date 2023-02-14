@@ -101,6 +101,12 @@ struct Task {
     command: Option<Command>,
 }
 
+#[derive(Deserialize)]
+struct Config {
+    #[serde(flatten)]
+    config: HashMap<String, Task>,
+}
+
 enum Instruction {
     Status,
     Start(Vec<String>),
@@ -108,26 +114,22 @@ enum Instruction {
     Restart(Vec<String>)
 }
 
-#[derive(Deserialize)]
 pub struct Taskmaster {
-    #[serde(skip)]
     procs: Vec<Arc<Mutex<Processus>>>,
-    #[serde(skip)]
     logger: Logger,
-    #[serde(flatten)]
-    config: HashMap<String, Task>,
-    #[serde(skip)]
+    config: Arc<Mutex<HashMap<String, Task>>>,
     work_q: Arc<Mutex<Vec<Instruction>>>,
 }
 
 impl Taskmaster {
 
-    pub fn executioner(work_q: &Arc<Mutex<Vec<Instruction>>>, procs: &Vec<Arc<Mutex<Processus>>>) {
+    pub fn executioner(work_q: &Arc<Mutex<Vec<Instruction>>>, procs: &Vec<Arc<Mutex<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>) {
         let mut arc_proc: Vec<Arc<Mutex<Processus>>> = vec![];
         for proc in procs.iter() {
             arc_proc.push(Arc::clone(&proc));
         }
         let work_q = Arc::clone(&work_q);
+        let config = Arc::clone(&config);
         thread::spawn(move || {
             loop {
                 let mut queue = work_q.get_mut().expect("Mutex Lock failed");
@@ -135,7 +137,7 @@ impl Taskmaster {
                 if let Some(instruction) = queue.pop() {
                     match instruction {
                         Instruction::Status => Taskmaster::status(&arc_proc),
-                        Instruction::Start(task) => Taskmaster::start(&arc_proc, task),
+                        Instruction::Start(task) => Taskmaster::start(&arc_proc, config, task),
                         Instruction::Stop(task) => self.stop(task),
                         Instruction::Restart(task) => self.restart(task),
                     }
@@ -164,7 +166,7 @@ impl Taskmaster {
         println!("{:-<55}", "-");
     }
 
-    fn start(procs: &Vec<Arc<Mutex<Processus>>>, mut config: &HashMap<String, Task>, names: Vec<String>) {
+    fn start(procs: &Vec<Arc<Mutex<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>) {
         for name in names {
             for proc in procs.iter() {
                 let mut proc = proc.lock().expect("Mutex Lock failed");
@@ -255,19 +257,19 @@ impl Taskmaster {
     pub fn build(file_path: &str) -> Result<Self, Box<dyn Error>> {
         let commands: Vec<Arc<Mutex<Processus>>> = vec!();
         let config = fs::read_to_string(file_path)?;
-        let config: HashMap<String, Task> = serde_yaml::from_str(&config)?;
+        let config: Config = serde_yaml::from_str(&config)?;
 
         Ok(Taskmaster {
             procs: commands,
             logger: Logger::new("taskmaster.log"),
-            config,
+            config: Arc::new(Mutex::new(config.config)),
             work_q: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
     pub fn execute(& mut self) -> Result<(), Box<dyn Error>> {
         let mut i = 0;
-        for (name, properties) in self.config.iter_mut() {
+        for (name, properties) in self.config.lock().expect("Mutex lock failed").iter_mut() {
 
             Self::build_command(properties)?;
 
