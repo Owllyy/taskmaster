@@ -101,6 +101,12 @@ struct Task {
     command: Option<Command>,
 }
 
+#[derive(Deserialize)]
+struct Config {
+    #[serde(flatten)]
+    config: HashMap<String, Task>,
+}
+
 enum Instruction {
     Status,
     Start(Vec<String>),
@@ -108,15 +114,10 @@ enum Instruction {
     Restart(Vec<String>)
 }
 
-#[derive(Deserialize)]
 pub struct Taskmaster {
-    #[serde(skip)]
     procs: Arc<Mutex<Vec<Processus>>>,
-    #[serde(skip)]
     logger: Logger,
-    #[serde(flatten)]
-    config: HashMap<String, Task>,
-    #[serde(skip)]
+    config: Arc<Mutex<HashMap<String, Task>>>,
     work_q: Arc<Mutex<Vec<Instruction>>>,
 }
 
@@ -227,45 +228,45 @@ impl Taskmaster {
         }
     }
 
-    fn restart(&mut self, name: Vec<String>) {
-        self.stop(name.to_owned());
-        Taskmaster::start(name);
-    }
+    // fn restart(&mut self, name: Vec<String>) {
+    //     self.stop(name.to_owned());
+    //     Taskmaster::start(name);
+    // }
 
-    fn start_all(&mut self) {
-        let mut all_task = Vec::new();
-        for (name, task) in &self.config {
-            if (task.autostart) {
-                all_task.push(name.to_owned());
-            }
-        }
-        self.start(all_task);
-    }
+    // fn start_all(&mut self) {
+    //     let mut all_task = Vec::new();
+    //     for (name, task) in &self.config {
+    //         if (task.autostart) {
+    //             all_task.push(name.to_owned());
+    //         }
+    //     }
+    //     self.start(all_task);
+    // }
 
-    fn stop_all(&mut self) {
-        let mut all_task = Vec::new();
-        for (name, _) in &self.config {
-            all_task.push(name.to_owned());
-        }
-        self.stop(all_task);
-    }
+    // fn stop_all(&mut self) {
+    //     let mut all_task = Vec::new();
+    //     for (name, _) in &self.config {
+    //         all_task.push(name.to_owned());
+    //     }
+    //     self.stop(all_task);
+    // }
 
     pub fn build(file_path: &str) -> Result<Self, Box<dyn Error>> {
-        let commands: Vec<Arc<Mutex<Processus>>> = vec!();
+        let commands: Arc<Mutex<Vec<Processus>>> = Arc::new(Mutex::new(vec!()));
         let config = fs::read_to_string(file_path)?;
-        let config: HashMap<String, Task> = serde_yaml::from_str(&config)?;
+        let config: Config = serde_yaml::from_str(&config)?;
 
         Ok(Taskmaster {
             procs: commands,
             logger: Logger::new("taskmaster.log"),
-            config,
+            config: Arc::new(Mutex::new(config.config)),
             work_q: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
     pub fn execute(& mut self) -> Result<(), Box<dyn Error>> {
         let mut i = 0;
-        for (name, properties) in self.config.iter_mut() {
+        for (name, properties) in self.config.lock().expect("Mutex lock failed").iter_mut() {
 
             Self::build_command(properties)?;
 
