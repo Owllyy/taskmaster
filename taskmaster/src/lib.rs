@@ -77,6 +77,7 @@ impl Logger {
 
     fn log(&mut self, msg: &str) {
         self.output.write(msg.as_bytes()).expect("Failed to log");
+        self.output.write(&[b'\n']).expect("Failed to log");
     }
 }
 
@@ -123,15 +124,15 @@ pub struct Taskmaster {
 
 impl Taskmaster {
 
-    pub fn executioner(work_q: &Arc<Mutex<Vec<Instruction>>>, procs: Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>) {
+    pub fn executioner(work_q: &Arc<Mutex<Vec<Instruction>>>, procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>) {
         let work_q = Arc::clone(&work_q);
         let mut procs = Arc::clone(&procs);
         let config = Arc::clone(&config);
         thread::spawn(move || {
             loop {
-                let mut queue = work_q.lock().expect("Mutex Lock failed");
+                thread::sleep(Duration::from_millis(500));
     
-                if let Some(instruction) = queue.pop() {
+                if let Some(instruction) = work_q.lock().expect("Mutex Lock failed").pop() {
                     match instruction {
                         Instruction::Status => Taskmaster::status(&mut procs),
                         Instruction::Start(task) => Taskmaster::start(&procs, &config, task),
@@ -220,7 +221,7 @@ impl Taskmaster {
                         },
                     };
                 } else {
-                    if let Some(task) = config.get_mut(&name) {
+                    if let Some(_) = config.get_mut(&name) {
                         println!("The program {name} is not running");
                     } else {
                         println!("Unknown Program");
@@ -257,10 +258,12 @@ impl Taskmaster {
         let commands: Arc<Mutex<Vec<Processus>>> = Arc::new(Mutex::new(vec!()));
         let config = fs::read_to_string(file_path)?;
         let config: Config = serde_yaml::from_str(&config)?;
-
+        let mut logger = Logger::new("taskmaster.log");
+        logger.log("Configuration file successfully parsed");
+        
         Ok(Taskmaster {
             procs: commands,
-            logger: Logger::new("taskmaster.log"),
+            logger,
             config: Arc::new(Mutex::new(config.config)),
             work_q: Arc::new(Mutex::new(Vec::new())),
         })
@@ -269,17 +272,23 @@ impl Taskmaster {
     pub fn execute(& mut self) -> Result<(), Box<dyn Error>> {
         let mut i = 0;
         self.procs = Arc::new(Mutex::new(Vec::<Processus>::new()));
+
+        self.logger.log("Building all processus...");
         for (name, properties) in self.config.lock().expect("Mutex lock failed").iter_mut() {
-
+            
             Self::build_command(properties)?;
-
+            
             let mut lock = self.procs.lock().expect("Mutex lock failed");
             for id in 0..properties.numprocs {
                 lock.push(Processus::build(i + id, name, properties.startretries));
             }
             i += properties.numprocs;
         }
+        
+        self.logger.log("Starting all 'autostart' processuses...");
         Taskmaster::start_all(&self.procs, &self.config);
+        self.logger.log("Launching executioner...");
+        Taskmaster::executioner(&self.work_q, &self.procs, &self.config);
         self.cli();
         Ok(())
     }
@@ -307,8 +316,8 @@ impl Taskmaster {
 
     fn cli(&mut self) {
         let mut buff = String::new();
+        self.logger.log("Staring the CLI");
         loop {
-            buff.clear();
             io::stdin().read_line(&mut buff).expect("Failed to read");
             let input: Vec<&str> = buff.split_whitespace().collect();
             if let Some(instruct) = input.get(0) {
@@ -317,6 +326,7 @@ impl Taskmaster {
                         process::exit(0);
                     }
                     "status" => {
+                        println!("STATUS");
                         let mut queue = self.work_q.lock().expect("Mutex Lock failed");
                         queue.push(Instruction::Status);
                     }
@@ -348,7 +358,10 @@ impl Taskmaster {
                         println!("Unknown command");
                     }
                 }
+            } else {
+                println!("wtf");
             }
+            buff.clear();
         }
     }
 }
