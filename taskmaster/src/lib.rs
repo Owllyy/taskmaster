@@ -18,7 +18,7 @@ extern "C" {
 }
 
 #[derive(Debug)]
-struct Processus {
+pub struct Processus {
     id: usize,
     name: String,
     child: Option<Child>,
@@ -82,7 +82,7 @@ impl Logger {
 
 #[derive(Deserialize, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
-struct Task {
+pub struct Task {
     cmd: String,
     numprocs: usize,
     umask: String,
@@ -107,7 +107,7 @@ struct Config {
     config: HashMap<String, Task>,
 }
 
-enum Instruction {
+pub enum Instruction {
     Status,
     Start(Vec<String>),
     Stop(Vec<String>),
@@ -123,32 +123,32 @@ pub struct Taskmaster {
 
 impl Taskmaster {
 
-    pub fn executioner(work_q: &Arc<Mutex<Vec<Instruction>>>, procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>) {
+    pub fn executioner(work_q: &Arc<Mutex<Vec<Instruction>>>, procs: Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>) {
         let work_q = Arc::clone(&work_q);
-        let procs = Arc::clone(&procs);
+        let mut procs = Arc::clone(&procs);
         let config = Arc::clone(&config);
         thread::spawn(move || {
             loop {
-                let mut queue = work_q.get_mut().expect("Mutex Lock failed");
+                let mut queue = work_q.lock().expect("Mutex Lock failed");
     
                 if let Some(instruction) = queue.pop() {
                     match instruction {
-                        Instruction::Status => Taskmaster::status(&procs),
+                        Instruction::Status => Taskmaster::status(&mut procs),
                         Instruction::Start(task) => Taskmaster::start(&procs, &config, task),
-                        Instruction::Stop(task) => Taskmaster::stop(&procs, &config, task),
-                        Instruction::Restart(task) => Taskmaster::restart(&procs, &config, task),
+                        Instruction::Stop(task) => Taskmaster::stop(&mut procs, &config, task),
+                        Instruction::Restart(task) => Taskmaster::restart(&mut procs, &config, task),
                     }
                 }
             }
         });
     }
 
-    fn status(procs: &Arc<Mutex<Vec<Processus>>>) {
-        let procs = procs.lock().expect("Fail to lock Mutex");
+    fn status(procs: &mut Arc<Mutex<Vec<Processus>>>) {
+        let mut procs = procs.lock().expect("Fail to lock Mutex");
         println!("{:-<55}", "-");
         println!("| {:^5} | {:^20} | {:^20} |", "ID", "NAME", "STATUS");
         println!("{:-<55}", "-");
-        for proc in procs.iter() {
+        for proc in procs.iter_mut() {
             if let Some(child) = proc.child.as_mut() {
                 let status = match child.try_wait() {
                     Ok(Some(st)) => format!("{st}"),
@@ -164,14 +164,15 @@ impl Taskmaster {
     }
 
     fn start(procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>) {
-        let procs = procs.lock().expect("Fail to lock Mutex");
-        let config = config.lock().expect("Fail to lock Mutex");
+        let mut procs = procs.lock().expect("Fail to lock Mutex");
+        let mut config = config.lock().expect("Fail to lock Mutex");
         for name in names {
-            for proc in procs.iter() {
+            for proc in procs.iter_mut() {
                 if let Some(child) = proc.child.as_mut() {
                     match child.try_wait() {
                         Ok(Some(_)) => {
-                            proc.child = Some(config[&name]
+                            proc.child = Some(config.get_mut(&name)
+                                .expect("Failed to get_mut")
                                 .command.as_mut().unwrap()
                                 .spawn().expect("Failed to spawn proc"));
                         },
@@ -193,11 +194,11 @@ impl Taskmaster {
         }
     }
 
-    fn stop(procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>) {
-        let procs = procs.lock().expect("Fail to lock Mutex");
-        let config = config.lock().expect("Fail to lock Mutex");
+    fn stop(procs: &mut Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>) {
+        let mut procs = procs.lock().expect("Fail to lock Mutex");
+        let mut config = config.lock().expect("Fail to lock Mutex");
         for name in names {
-            for proc in procs.iter() {
+            for proc in procs.iter_mut() {
                 if let Some(child) = proc.child.as_mut() {
                     match child.try_wait() {
                         Ok(Some(exitstatus)) => {
@@ -229,28 +230,28 @@ impl Taskmaster {
         }
     }
 
-    fn restart(procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>) {
+    fn restart(procs: &mut Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>) {
         Taskmaster::stop(procs, config, names.to_owned());
         Taskmaster::start(procs, config, names);
     }
 
-    // fn start_all(&mut self) {
-    //     let mut all_task = Vec::new();
-    //     for (name, task) in &self.config {
-    //         if (task.autostart) {
-    //             all_task.push(name.to_owned());
-    //         }
-    //     }
-    //     self.start(all_task);
-    // }
+    fn start_all(procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>) {
+        let mut all_task: Vec<String> = Vec::new();
+        for (name, task) in config.lock().expect("Mutex lock failed").iter() {
+            if task.autostart {
+                all_task.push(name.to_owned());
+            }
+        }
+        Taskmaster::start(procs, config, all_task);
+    }
 
-    // fn stop_all(&mut self) {
-    //     let mut all_task = Vec::new();
-    //     for (name, _) in &self.config {
-    //         all_task.push(name.to_owned());
-    //     }
-    //     self.stop(all_task);
-    // }
+    fn stop_all(procs: &mut Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>) {
+        let mut all_task = Vec::new();
+        for (name, _) in config.lock().expect("Mutex lock failed").iter() {
+            all_task.push(name.to_owned());
+        }
+        Taskmaster::stop(procs, config, all_task);
+    }
 
     pub fn build(file_path: &str) -> Result<Self, Box<dyn Error>> {
         let commands: Arc<Mutex<Vec<Processus>>> = Arc::new(Mutex::new(vec!()));
@@ -267,16 +268,18 @@ impl Taskmaster {
 
     pub fn execute(& mut self) -> Result<(), Box<dyn Error>> {
         let mut i = 0;
+        self.procs = Arc::new(Mutex::new(Vec::<Processus>::new()));
         for (name, properties) in self.config.lock().expect("Mutex lock failed").iter_mut() {
 
             Self::build_command(properties)?;
 
+            let mut lock = self.procs.lock().expect("Mutex lock failed");
             for id in 0..properties.numprocs {
-                self.procs.push(Arc::new(Mutex::new(Processus::build(i + id, name, properties.startretries))));
+                lock.push(Processus::build(i + id, name, properties.startretries));
             }
             i += properties.numprocs;
         }
-        self.start_all();
+        Taskmaster::start_all(&self.procs, &self.config);
         self.cli();
         Ok(())
     }
@@ -315,12 +318,10 @@ impl Taskmaster {
                     }
                     "status" => {
                         let mut queue = self.work_q.lock().expect("Mutex Lock failed");
-                        self.status();
                         queue.push(Instruction::Status);
                     }
                     "start" => {
                         if let Some(arg) = input.get(1) {
-                            self.start(vec![arg.to_string()]);
                             let mut queue = self.work_q.lock().expect("Mutex Lock failed");
                             queue.push(Instruction::Start(vec![arg.to_string()]));
                         } else {
