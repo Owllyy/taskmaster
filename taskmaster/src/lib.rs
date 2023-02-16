@@ -130,7 +130,7 @@ impl Taskmaster {
         let config = Arc::clone(&config);
         thread::spawn(move || {
             loop {
-                thread::sleep(Duration::from_millis(500));
+                thread::sleep(Duration::from_millis(100));
     
                 if let Some(instruction) = work_q.lock().expect("Mutex Lock failed").pop() {
                     match instruction {
@@ -140,6 +140,7 @@ impl Taskmaster {
                         Instruction::Restart(task) => Taskmaster::restart(&mut procs, &config, task),
                     }
                 }
+                //todo monitor
             }
         });
     }
@@ -168,7 +169,7 @@ impl Taskmaster {
         let mut procs = procs.lock().expect("Fail to lock Mutex");
         let mut config = config.lock().expect("Fail to lock Mutex");
         for name in names {
-            for proc in procs.iter_mut() {
+            for proc in procs.iter_mut().filter(|e| e.name == name) {
                 if let Some(child) = proc.child.as_mut() {
                     match child.try_wait() {
                         Ok(Some(_)) => {
