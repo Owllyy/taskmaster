@@ -130,8 +130,6 @@ impl Taskmaster {
         let config = Arc::clone(&config);
         thread::spawn(move || {
             loop {
-                thread::sleep(Duration::from_millis(500));
-    
                 if let Some(instruction) = work_q.lock().expect("Mutex Lock failed").pop() {
                     match instruction {
                         Instruction::Status => Taskmaster::status(&mut procs),
@@ -326,7 +324,6 @@ impl Taskmaster {
                         process::exit(0);
                     }
                     "status" => {
-                        println!("STATUS");
                         let mut queue = self.work_q.lock().expect("Mutex Lock failed");
                         queue.push(Instruction::Status);
                     }
@@ -358,8 +355,6 @@ impl Taskmaster {
                         println!("Unknown command");
                     }
                 }
-            } else {
-                println!("wtf");
             }
             buff.clear();
         }
