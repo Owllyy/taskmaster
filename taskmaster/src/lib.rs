@@ -1,72 +1,21 @@
-use std::fmt;
-use std::{fs, default};
+use std::{fs};
 use std::fs::File;
-use std::io::{self, Read};
-use std::process::{self, Command, Child, Stdio};
+use std::io::{self};
+use std::process::{self, Command, Stdio};
 use serde::Deserialize;
 use std::error::Error;
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
-use std::thread::{self, sleep};
+use std::thread::{self};
 use std::sync::{Mutex, Arc};
+
+pub mod processus;
+use processus::{Status, Processus};
 
 #[allow(non_camel_case_types)]
 type mode_t = u32;
 
 extern "C" {
     fn umask(mask: mode_t) -> mode_t;
-}
-
-#[derive(Debug)]
-enum Status {
-    Starting,
-    Stoping,
-    Active,
-    Inactive,
-}
-
-impl fmt::Display for Status {
-    //todo understand formating with fmt::Display
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "      {:?}      ", self)
-    }
-}
-
-#[derive(Debug)]
-pub struct Processus {
-    id: usize,
-    name: String,
-    child: Option<Child>,
-    retries: usize,
-    timer: Instant,
-    status: Status,
-}
-
-impl Processus {
-    fn build(id: usize, name: &str, retries: usize) -> Self {
-        Self {
-            id,
-            name: name.to_owned(),
-            child: None,
-            retries,
-            timer: Instant::now(),
-            status: Status::Inactive,
-        }
-    }
-
-    fn set_timer(&mut self) {
-        self.timer = Instant::now();
-    }
-
-    fn check_timer(&self, duration: usize) -> bool {
-        let duration = Duration::from_secs(duration as u64);
-        
-        if self.timer.elapsed() < duration {
-            return false;
-        }
-
-        true
-    }
 }
 
 struct Logger {
@@ -133,15 +82,15 @@ pub enum Instruction {
 }
 
 pub struct Taskmaster {
-    procs: Arc<Mutex<Vec<Processus>>>,
+    processus: Arc<Mutex<Vec<Processus>>>,
     logger: Logger,
     config: Arc<Mutex<HashMap<String, Task>>>,
-    work_q: Arc<Mutex<Vec<Instruction>>>,
+    workQueue: Arc<Mutex<Vec<Instruction>>>,
 }
 
 impl Taskmaster {
 
-    pub fn executioner(work_q: &Arc<Mutex<Vec<Instruction>>>, procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>) {
+    fn executioner(work_q: &Arc<Mutex<Vec<Instruction>>>, procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>) {
         let work_q = Arc::clone(&work_q);
         let mut procs = Arc::clone(&procs);
         let config = Arc::clone(&config);
@@ -149,10 +98,10 @@ impl Taskmaster {
             loop {
                 if let Some(instruction) = work_q.lock().expect("Mutex Lock failed").pop() {
                     match instruction {
-                        Instruction::Status => Taskmaster::status(&mut procs),
-                        Instruction::Start(task) => Taskmaster::start(&mut procs, &config, task),
-                        Instruction::Stop(task) => Taskmaster::stop(&mut procs, &config, task),
-                        Instruction::Restart(task) => Taskmaster::restart(&mut procs, &config, task),
+                        Instruction::Status => Taskmaster::status_command(&mut procs),
+                        Instruction::Start(task) => Taskmaster::start_command(&mut procs, &config, task),
+                        Instruction::Stop(task) => Taskmaster::stop_command(&mut procs, &config, task),
+                        Instruction::Restart(task) => Taskmaster::restart_command(&mut procs, &config, task),
                     }
                 }
                 Taskmaster::monitor(&procs, &config);
@@ -161,84 +110,78 @@ impl Taskmaster {
     }
 
     fn monitor(procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>) {
-            let mut procs = procs.lock().expect("Fail to lock Mutex");
-            let mut config = config.lock().expect("Fail to lock Mutex");
-            for (name, task) in config.iter_mut() {
-                for proc in procs.iter_mut().filter(|e| &e.name == name) {
-                    if let Some(child) = proc.child.as_mut() {
-                        match child.try_wait() {
-                            Ok(Some(exitcode)) => {
-                                match proc.status {
-                                    Status::Active => {
-                                        //todo understand the double ref &&
-                                        if (task.autorestart == "unexpected" && task.exitcodes.iter().find(|e| e == &&exitcode.code().expect("Failed to get exit code")) == None)
-                                        || task.autorestart == "true" {
-                                            proc.child = Some(task.command.as_mut().expect("Command is not build").spawn().expect("Spawn failed"));
-                                            proc.status = Status::Starting;
-                                            proc.retries = task.startretries;
-                                            proc.set_timer();
-                                        } else {
-                                            proc.child = None;
-                                            proc.status = Status::Inactive;
-                                        }
-                                    },
-                                    Status::Inactive => {
-                                        panic!("Child exist but the status is Inactive");
-                                    },
-                                    Status::Starting => {
-                                        if (task.autorestart == "true")
-                                        || (task.autorestart == "unexpected" && task.exitcodes.iter().find(|e| e == &&exitcode.code().expect("Failed to get exit code")) == None) {
-                                            proc.child = Some(task.command.as_mut().expect("Command is not build").spawn().expect("Spawn failed"));
-                                            proc.retries -= 1;
-                                            proc.set_timer();
-                                        } else {
-                                            proc.child = None;
-                                            proc.status = Status::Inactive;
-                                        }
-                                    },
-                                    Status::Stoping => {
+        let mut procs = procs.lock().expect("Fail to lock Mutex");
+        let mut config = config.lock().expect("Fail to lock Mutex");
+        for (name, task) in config.iter_mut() {
+            for proc in procs.iter_mut().filter(|e| &e.name == name) {
+                if let Some(child) = proc.child.as_mut() {
+                    match child.try_wait() {
+                        Ok(Some(exitcode)) => {
+                            match proc.status {
+                                Status::Active => {
+                                    //todo understand the double ref &&
+                                    if (task.autorestart == "unexpected" && task.exitcodes.iter().find(|e| e == &&exitcode.code().expect("Failed to get exit code")) == None)
+                                    || task.autorestart == "true" {
+                                        proc.start_child(task.command.as_mut().unwrap(), task.startretries);
+                                    } else {
+                                        proc.reset_child();
+                                    }
+                                },
+                                Status::Inactive => {
+                                    panic!("Child exist but the status is Inactive");
+                                },
+                                Status::Starting => {
+                                    if (task.autorestart == "true")
+                                    || (task.autorestart == "unexpected" && task.exitcodes.iter().find(|e| e == &&exitcode.code().expect("Failed to get exit code")) == None) {
+                                        proc.child = Some(task.command.as_mut().expect("Command is not build").spawn().expect("Spawn failed"));
+                                        proc.retries -= 1;
+                                        proc.set_timer();
+                                    } else {
+                                        proc.reset_child();
+                                    }
+                                },
+                                Status::Stoping => {
+                                    proc.reset_child();
+                                },
+                            }
+                        },
+                        Ok(None) => {
+                            match proc.status {
+                                Status::Inactive => {
+                                    panic!("The procesus is active but got the status Inactive");
+                                },
+                                Status::Starting => {
+                                    if proc.check_timer(task.starttime) {
+                                        proc.status = Status::Active;
+                                    }
+                                },
+                                Status::Stoping => {
+                                    if proc.check_timer(task.stoptime) {
+                                        proc.child.as_mut().expect("No child but status is Stoping").kill().expect("Failed to kill child");
                                         proc.child = None;
                                         proc.status = Status::Inactive;
-                                    },
-                                }
-                            },
-                            Ok(None) => {
-                                match proc.status {
-                                    Status::Inactive => {
-                                        panic!("The procesus is active but got the status Inactive");
-                                    },
-                                    Status::Starting => {
-                                        if proc.check_timer(task.starttime) {
-                                            proc.status = Status::Active;
-                                        }
-                                    },
-                                    Status::Stoping => {
-                                        if proc.check_timer(task.stoptime) {
-                                            proc.child.as_mut().expect("No child but status is Stoping").kill().expect("Failed to kill child");
-                                            proc.child = None;
-                                            proc.status = Status::Inactive;
-                                        }
-                                    },
-                                    _ => {},
-                                }
-                            },
-                            Err(_) => {
-                                panic!("try wait failed");
-                            },
-                        };
-                    } else {
-                        match proc.status {
-                            Status::Inactive => {},
-                            _ => {
-                                panic!("Status is set but there is no child");
-                            },
+                                    }
+                                },
+                                _ => {},
+                            }
+                        },
+                        Err(_) => {
+                            panic!("try wait failed");
+                        },
+                    };
+                } else {
+                    match proc.status {
+                        Status::Inactive => {},
+                        _ => {
+                            panic!("Status is set but there is no child");
+                        },
                     }
                 }
             }
         }
     }
 
-    fn status(procs: &mut Arc<Mutex<Vec<Processus>>>) {
+    fn status_command(procs: &mut Arc<Mutex<Vec<Processus>>>) {
         let mut procs = procs.lock().expect("Fail to lock Mutex");
         println!("{:-<55}", "-");
         println!("| {:^5} | {:^20} | {:^20} |", "ID", "NAME", "STATUS");
@@ -249,47 +192,42 @@ impl Taskmaster {
         println!("{:-<55}", "-");
     }
 
-    fn start(procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>) {
+    fn start_command(procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>) {
         let mut procs = procs.lock().expect("Fail to lock Mutex");
         let mut config = config.lock().expect("Fail to lock Mutex");
+
         for name in names {
             let task = if let Some(task) = config.get_mut(&name) {
                 task
             } else {
-                println!("Command not found");
-                return;
+                println!("Command not found: {name}");
+                break;
             };
             for proc in procs.iter_mut().filter(|e| e.name == name) {
-                if let Some(child) = proc.child.as_mut() {
-                    match child.try_wait() {
-                        Ok(Some(_)) => {
-                            proc.child = Some(task
-                                .command.as_mut().unwrap()
-                                .spawn().expect("Failed to spawn proc"));
-                            proc.set_timer();
-                            proc.status = Status::Starting;
-                            proc.retries = task.startretries;
-                        },
-                        Ok(None) => {
-                            println!("The program is already running");
-                        }
-                        Err(_) => {
-                            panic!("try wait failed");
-                        },
-                    };
-                } else {
-                    proc.child = Some(task
-                        .command.as_mut().expect("Can't get mut command")
-                        .spawn().expect("Failed to spawn proc"));
-                    proc.set_timer();
-                    proc.status = Status::Starting;
-                    proc.retries = task.startretries;
-                }
+                Taskmaster::start_processus(proc, task);
             }
         }
     }
 
-    fn stop(procs: &mut Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>) {
+    fn start_processus(proc: &mut Processus, task: &mut Task) {
+        if let Some(child) = proc.child.as_mut() {
+            match child.try_wait() {
+                Ok(Some(_)) => {
+                    proc.start_child(task.command.as_mut().unwrap(), task.startretries);
+                },
+                Ok(None) => {
+                    println!("The program {} is already running", proc.name);
+                }
+                Err(_) => {
+                    panic!("try_wait() failed");
+                },
+            };
+        } else {
+            proc.start_child(task.command.as_mut().unwrap(), task.startretries);
+        }
+    }
+
+    fn stop_command(procs: &mut Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>) {
         let mut procs = procs.lock().expect("Fail to lock Mutex");
         let mut config = config.lock().expect("Fail to lock Mutex");
         for name in names {
@@ -300,58 +238,50 @@ impl Taskmaster {
                 return;
             };
             for proc in procs.iter_mut().filter(|e| e.name == name) {
-                if let Some(child) = proc.child.as_mut() {
-                    match child.try_wait() {
-                        Ok(Some(exitstatus)) => {
-                            println!("The program {name} as stoped running, exit code : {exitstatus}");
-                        },
-                        Ok(None) => {
-                            Taskmaster::stop_child(&task.stopsignal, child);
-                            proc.set_timer();
-                            proc.status = Status::Stoping;
-                        }
-                        Err(_) => {
-                            panic!("try_wait() failed");
-                        },
-                    };
-                } else {
-                    println!("The program {name} is not running");
-                }
+                Taskmaster::stop_processus(proc, task);
             }
         }
     }
 
-    fn stop_child(signal: &String, child: &mut Child) {
-        match Command::new("kill")
-        // TODO: replace `TERM` to signal you want.
-        .args(["-s", signal, &child.id().to_string()])
-        .spawn() {
-            Ok(_) => {},
-            Err(e) => panic!("Fail to send the stop signal : {e}"),
+    fn stop_processus(proc: &mut Processus, task: &mut Task) {
+        if let Some(child) = proc.child.as_mut() {
+            match child.try_wait() {
+                Ok(Some(exitstatus)) => {
+                    println!("The program {} as stoped running, exit code : {exitstatus}", proc.name);
+                },
+                Ok(None) => {
+                    proc.stop_child(&task.stopsignal);
+                }
+                Err(_) => {
+                    panic!("try_wait() failed");
+                },
+            };
+        } else {
+            println!("The program {} is not running", proc.name);
         }
     }
 
-    fn restart(procs: &mut Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>) {
-        Taskmaster::stop(procs, config, names.to_owned());
-        Taskmaster::start(procs, config, names);
+    fn restart_command(procs: &mut Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>) {
+        Taskmaster::stop_command(procs, config, names.to_owned());
+        Taskmaster::start_command(procs, config, names);
     }
 
-    fn start_all(procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>) {
+    fn start_all_autostart_task(procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>) {
         let mut all_task: Vec<String> = Vec::new();
         for (name, task) in config.lock().expect("Mutex lock failed").iter() {
             if task.autostart {
                 all_task.push(name.to_owned());
             }
         }
-        Taskmaster::start(procs, config, all_task);
+        Taskmaster::start_command(procs, config, all_task);
     }
 
-    fn stop_all(procs: &mut Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>) {
+    fn stop_all_task(procs: &mut Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>) {
         let mut all_task = Vec::new();
         for (name, _) in config.lock().expect("Mutex lock failed").iter() {
             all_task.push(name.to_owned());
         }
-        Taskmaster::stop(procs, config, all_task);
+        Taskmaster::stop_command(procs, config, all_task);
     }
 
     pub fn build(file_path: &str) -> Result<Self, Box<dyn Error>> {
@@ -362,23 +292,23 @@ impl Taskmaster {
         logger.log("Configuration file successfully parsed");
         
         Ok(Taskmaster {
-            procs: commands,
+            processus: commands,
             logger,
             config: Arc::new(Mutex::new(config.config)),
-            work_q: Arc::new(Mutex::new(Vec::new())),
+            workQueue: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
     pub fn execute(& mut self) -> Result<(), Box<dyn Error>> {
         let mut i = 0;
-        self.procs = Arc::new(Mutex::new(Vec::<Processus>::new()));
+        self.processus = Arc::new(Mutex::new(Vec::<Processus>::new()));
 
         self.logger.log("Building all processus...");
         for (name, properties) in self.config.lock().expect("Mutex lock failed").iter_mut() {
             
             Self::build_command(properties)?;
             
-            let mut lock = self.procs.lock().expect("Mutex lock failed");
+            let mut lock = self.processus.lock().expect("Mutex lock failed");
             for id in 0..properties.numprocs {
                 lock.push(Processus::build(i + id, name, properties.startretries));
             }
@@ -386,9 +316,9 @@ impl Taskmaster {
         }
         
         self.logger.log("Starting all 'autostart' processuses...");
-        Taskmaster::start_all(&self.procs, &self.config);
+        Taskmaster::start_all_autostart_task(&self.processus, &self.config);
         self.logger.log("Launching executioner...");
-        Taskmaster::executioner(&self.work_q, &self.procs, &self.config);
+        Taskmaster::executioner(&self.workQueue, &self.processus, &self.config);
         self.cli();
         Ok(())
     }
@@ -426,12 +356,12 @@ impl Taskmaster {
                         process::exit(0);
                     }
                     "status" => {
-                        let mut queue = self.work_q.lock().expect("Mutex Lock failed");
+                        let mut queue = self.workQueue.lock().expect("Mutex Lock failed");
                         queue.push(Instruction::Status);
                     }
                     "start" => {
                         if let Some(arg) = input.get(1) {
-                            let mut queue = self.work_q.lock().expect("Mutex Lock failed");
+                            let mut queue = self.workQueue.lock().expect("Mutex Lock failed");
                             queue.push(Instruction::Start(vec![arg.to_string()]));
                         } else {
                             println!("Which program you want to start ? ($ start nginx)");
@@ -439,7 +369,7 @@ impl Taskmaster {
                     }
                     "stop" => {
                         if let Some(arg) = input.get(1) {
-                            let mut queue = self.work_q.lock().expect("Mutex Lock failed");
+                            let mut queue = self.workQueue.lock().expect("Mutex Lock failed");
                             queue.push(Instruction::Stop(vec![arg.to_string()]));
                         } else {
                             println!("Which program you want to stop ? ($ stop nginx)");
@@ -447,7 +377,7 @@ impl Taskmaster {
                     }
                     "restart" => {
                         if let Some(arg) = input.get(1) {
-                            let mut queue = self.work_q.lock().expect("Mutex Lock failed");
+                            let mut queue = self.workQueue.lock().expect("Mutex Lock failed");
                             queue.push(Instruction::Restart(vec![arg.to_string()]));
                         } else {
                             println!("Which program you want to restart ? ($ restart nginx)");
