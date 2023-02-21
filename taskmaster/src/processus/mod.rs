@@ -1,6 +1,10 @@
 use std::process::{Child, Command};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::fmt;
+
+use crate::signal::Signal;
+use crate::{mode_t, Logger, umask, kill};
 
 #[derive(Debug)]
 pub enum Status {
@@ -52,23 +56,31 @@ impl Processus {
         true
     }
 
-    pub fn stop_child(&mut self, signal: &String) {
-        match Command::new("kill")
-        // TODO: replace `TERM` to signal you want.
-        .args(["-s", signal, &self.child.as_ref().unwrap().id().to_string()])
-        .spawn() {
-            Ok(_) => {},
-            Err(e) => panic!("Fail to send the stop signal : {e}"),
+    pub fn stop_child(&mut self, signal: &String, logger: &Arc<Mutex<Logger>>) {
+        let sid = Signal::parse(&signal).unwrap_or(Signal::SIGTERM);
+        unsafe {
+            if kill(self.child.as_mut().unwrap().id() as i32, sid as i32) < 0 {
+                panic!("Failed to kill process");
+            }
         }
         self.set_timer();
         self.status = Status::Stoping;
+        logger.lock().expect("Mutex lock failed").log(&format!("    stoped process - {} {}", self.id, self.name));
     }
 
-    pub fn start_child(&mut self, command: &mut Command, startRetries: usize) {
+    pub fn start_child(&mut self, command: &mut Command, start_retries: usize, mask: mode_t, logger: &Arc<Mutex<Logger>>) {
+        let old_mask: mode_t;
+        unsafe {
+            old_mask = umask(mask);
+        }
         self.child = Some(command.spawn().expect("Failed to spawn self"));
+        unsafe {
+            umask(old_mask);
+        }
         self.set_timer();
         self.status = Status::Starting;
-        self.retries = startRetries;
+        self.retries = start_retries;
+        logger.lock().expect("Mutex lock failed").log(&format!("    started process - {} {}", self.id, self.name));
     }
 
     pub fn reset_child(&mut self) {

@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::{self};
 use std::process::{self, Command, Stdio};
 use serde::Deserialize;
+use signal::Signal;
 use std::error::Error;
 use std::collections::HashMap;
 use std::thread::{self};
@@ -10,17 +11,22 @@ use std::sync::{Mutex, Arc};
 
 pub mod processus;
 use processus::{Status, Processus};
+pub mod signal;
 
 #[allow(non_camel_case_types)]
 type mode_t = u32;
 
 extern "C" {
     fn umask(mask: mode_t) -> mode_t;
+    fn kill(pid: i32, sig: i32) -> i32;
 }
 
-struct Logger {
+pub struct Logger {
     output: Box<dyn io::Write>,
 }
+
+unsafe impl Send for Logger {}
+unsafe impl Sync for Logger {}
 
 impl Default for Logger {
     fn default() -> Self {
@@ -82,34 +88,35 @@ pub enum Instruction {
 }
 
 pub struct Taskmaster {
-    processus: Arc<Mutex<Vec<Processus>>>,
-    logger: Logger,
+    procs: Arc<Mutex<Vec<Processus>>>,
+    logger: Arc<Mutex<Logger>>,
     config: Arc<Mutex<HashMap<String, Task>>>,
-    workQueue: Arc<Mutex<Vec<Instruction>>>,
+    work_queue: Arc<Mutex<Vec<Instruction>>>,
 }
 
 impl Taskmaster {
 
-    fn executioner(work_q: &Arc<Mutex<Vec<Instruction>>>, procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>) {
+    fn executioner(work_q: &Arc<Mutex<Vec<Instruction>>>, procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, logger: &Arc<Mutex<Logger>>) {
         let work_q = Arc::clone(&work_q);
         let mut procs = Arc::clone(&procs);
         let config = Arc::clone(&config);
+        let logger = Arc::clone(&logger);
         thread::spawn(move || {
             loop {
                 if let Some(instruction) = work_q.lock().expect("Mutex Lock failed").pop() {
                     match instruction {
                         Instruction::Status => Taskmaster::status_command(&mut procs),
-                        Instruction::Start(task) => Taskmaster::start_command(&mut procs, &config, task),
-                        Instruction::Stop(task) => Taskmaster::stop_command(&mut procs, &config, task),
-                        Instruction::Restart(task) => Taskmaster::restart_command(&mut procs, &config, task),
+                        Instruction::Start(task) => Taskmaster::start_command(&mut procs, &config, task, &logger),
+                        Instruction::Stop(task) => Taskmaster::stop_command(&mut procs, &config, task, &logger),
+                        Instruction::Restart(task) => Taskmaster::restart_command(&mut procs, &config, task, &logger),
                     }
                 }
-                Taskmaster::monitor(&procs, &config);
+                Taskmaster::monitor(&procs, &config, &logger);
             }
         });
     }
 
-    fn monitor(procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>) {
+    fn monitor(procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, logger: &Arc<Mutex<Logger>>) {
         let mut procs = procs.lock().expect("Fail to lock Mutex");
         let mut config = config.lock().expect("Fail to lock Mutex");
         for (name, task) in config.iter_mut() {
@@ -122,7 +129,7 @@ impl Taskmaster {
                                     //todo understand the double ref &&
                                     if (task.autorestart == "unexpected" && task.exitcodes.iter().find(|e| e == &&exitcode.code().expect("Failed to get exit code")) == None)
                                     || task.autorestart == "true" {
-                                        proc.start_child(task.command.as_mut().unwrap(), task.startretries);
+                                        proc.start_child(task.command.as_mut().unwrap(), task.startretries, task.umask.parse::<mode_t>().expect("umask is in wrong format"), logger);
                                     } else {
                                         proc.reset_child();
                                     }
@@ -192,7 +199,7 @@ impl Taskmaster {
         println!("{:-<55}", "-");
     }
 
-    fn start_command(procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>) {
+    fn start_command(procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>, logger: &Arc<Mutex<Logger>>) {
         let mut procs = procs.lock().expect("Fail to lock Mutex");
         let mut config = config.lock().expect("Fail to lock Mutex");
 
@@ -204,16 +211,16 @@ impl Taskmaster {
                 break;
             };
             for proc in procs.iter_mut().filter(|e| e.name == name) {
-                Taskmaster::start_processus(proc, task);
+                Taskmaster::start_processus(proc, task, logger);
             }
         }
     }
 
-    fn start_processus(proc: &mut Processus, task: &mut Task) {
+    fn start_processus(proc: &mut Processus, task: &mut Task, logger: &Arc<Mutex<Logger>>) {
         if let Some(child) = proc.child.as_mut() {
             match child.try_wait() {
                 Ok(Some(_)) => {
-                    proc.start_child(task.command.as_mut().unwrap(), task.startretries);
+                    proc.start_child(task.command.as_mut().unwrap(), task.startretries, task.umask.parse::<mode_t>().expect("umask is in wrong format"), logger);
                 },
                 Ok(None) => {
                     println!("The program {} is already running", proc.name);
@@ -223,11 +230,11 @@ impl Taskmaster {
                 },
             };
         } else {
-            proc.start_child(task.command.as_mut().unwrap(), task.startretries);
+            proc.start_child(task.command.as_mut().unwrap(), task.startretries, task.umask.parse::<mode_t>().expect("umask is in wrong format"), logger);
         }
     }
 
-    fn stop_command(procs: &mut Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>) {
+    fn stop_command(procs: &mut Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>, logger: &Arc<Mutex<Logger>>) {
         let mut procs = procs.lock().expect("Fail to lock Mutex");
         let mut config = config.lock().expect("Fail to lock Mutex");
         for name in names {
@@ -238,19 +245,19 @@ impl Taskmaster {
                 return;
             };
             for proc in procs.iter_mut().filter(|e| e.name == name) {
-                Taskmaster::stop_processus(proc, task);
+                Taskmaster::stop_processus(proc, task, logger);
             }
         }
     }
 
-    fn stop_processus(proc: &mut Processus, task: &mut Task) {
+    fn stop_processus(proc: &mut Processus, task: &mut Task, logger: &Arc<Mutex<Logger>>) {
         if let Some(child) = proc.child.as_mut() {
             match child.try_wait() {
                 Ok(Some(exitstatus)) => {
                     println!("The program {} as stoped running, exit code : {exitstatus}", proc.name);
                 },
                 Ok(None) => {
-                    proc.stop_child(&task.stopsignal);
+                    proc.stop_child(&task.stopsignal, logger);
                 }
                 Err(_) => {
                     panic!("try_wait() failed");
@@ -261,64 +268,64 @@ impl Taskmaster {
         }
     }
 
-    fn restart_command(procs: &mut Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>) {
-        Taskmaster::stop_command(procs, config, names.to_owned());
-        Taskmaster::start_command(procs, config, names);
+    fn restart_command(procs: &mut Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, names: Vec<String>, logger: &Arc<Mutex<Logger>>) {
+        Taskmaster::stop_command(procs, config, names.to_owned(), logger);
+        Taskmaster::start_command(procs, config, names, logger);
     }
 
-    fn start_all_autostart_task(procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>) {
+    fn start_all_autostart_task(procs: &Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, logger: &Arc<Mutex<Logger>>) {
         let mut all_task: Vec<String> = Vec::new();
         for (name, task) in config.lock().expect("Mutex lock failed").iter() {
             if task.autostart {
                 all_task.push(name.to_owned());
             }
         }
-        Taskmaster::start_command(procs, config, all_task);
+        Taskmaster::start_command(procs, config, all_task, logger);
     }
 
-    fn stop_all_task(procs: &mut Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>) {
+    fn stop_all_task(procs: &mut Arc<Mutex<Vec<Processus>>>, config: &Arc<Mutex<HashMap<String, Task>>>, logger: &Arc<Mutex<Logger>>) {
         let mut all_task = Vec::new();
         for (name, _) in config.lock().expect("Mutex lock failed").iter() {
             all_task.push(name.to_owned());
         }
-        Taskmaster::stop_command(procs, config, all_task);
+        Taskmaster::stop_command(procs, config, all_task, logger);
     }
 
     pub fn build(file_path: &str) -> Result<Self, Box<dyn Error>> {
         let commands: Arc<Mutex<Vec<Processus>>> = Arc::new(Mutex::new(vec!()));
         let config = fs::read_to_string(file_path)?;
         let config: Config = serde_yaml::from_str(&config)?;
-        let mut logger = Logger::new("taskmaster.log");
-        logger.log("Configuration file successfully parsed");
+        let mut logger = Arc::new(Mutex::new(Logger::new("taskmaster.log")));
+        logger.lock().expect("Mutex lock failed").log("Configuration file successfully parsed");
         
         Ok(Taskmaster {
-            processus: commands,
+            procs: commands,
             logger,
             config: Arc::new(Mutex::new(config.config)),
-            workQueue: Arc::new(Mutex::new(Vec::new())),
+            work_queue: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
     pub fn execute(& mut self) -> Result<(), Box<dyn Error>> {
         let mut i = 0;
-        self.processus = Arc::new(Mutex::new(Vec::<Processus>::new()));
+        self.procs = Arc::new(Mutex::new(Vec::<Processus>::new()));
 
-        self.logger.log("Building all processus...");
+        self.logger.lock().expect("Mutex lock failed").log("Building all processus...");
         for (name, properties) in self.config.lock().expect("Mutex lock failed").iter_mut() {
             
             Self::build_command(properties)?;
             
-            let mut lock = self.processus.lock().expect("Mutex lock failed");
+            let mut lock = self.procs.lock().expect("Mutex lock failed");
             for id in 0..properties.numprocs {
                 lock.push(Processus::build(i + id, name, properties.startretries));
             }
             i += properties.numprocs;
         }
         
-        self.logger.log("Starting all 'autostart' processuses...");
-        Taskmaster::start_all_autostart_task(&self.processus, &self.config);
-        self.logger.log("Launching executioner...");
-        Taskmaster::executioner(&self.workQueue, &self.processus, &self.config);
+        self.logger.lock().expect("Mutex lock failed").log("Starting all 'autostart' processuses...");
+        Taskmaster::start_all_autostart_task(&self.procs, &self.config, &self.logger);
+        self.logger.lock().expect("Mutex lock failed").log("Launching executioner...");
+        Taskmaster::executioner(&self.work_queue, &self.procs, &self.config, &self.logger);
         self.cli();
         Ok(())
     }
@@ -346,7 +353,7 @@ impl Taskmaster {
 
     fn cli(&mut self) {
         let mut buff = String::new();
-        self.logger.log("Staring the CLI");
+        self.logger.lock().expect("Mutex lock failed").log("Staring the CLI");
         loop {
             io::stdin().read_line(&mut buff).expect("Failed to read");
             let input: Vec<&str> = buff.split_whitespace().collect();
@@ -356,12 +363,12 @@ impl Taskmaster {
                         process::exit(0);
                     }
                     "status" => {
-                        let mut queue = self.workQueue.lock().expect("Mutex Lock failed");
+                        let mut queue = self.work_queue.lock().expect("Mutex Lock failed");
                         queue.push(Instruction::Status);
                     }
                     "start" => {
                         if let Some(arg) = input.get(1) {
-                            let mut queue = self.workQueue.lock().expect("Mutex Lock failed");
+                            let mut queue = self.work_queue.lock().expect("Mutex Lock failed");
                             queue.push(Instruction::Start(vec![arg.to_string()]));
                         } else {
                             println!("Which program you want to start ? ($ start nginx)");
@@ -369,7 +376,7 @@ impl Taskmaster {
                     }
                     "stop" => {
                         if let Some(arg) = input.get(1) {
-                            let mut queue = self.workQueue.lock().expect("Mutex Lock failed");
+                            let mut queue = self.work_queue.lock().expect("Mutex Lock failed");
                             queue.push(Instruction::Stop(vec![arg.to_string()]));
                         } else {
                             println!("Which program you want to stop ? ($ stop nginx)");
@@ -377,7 +384,7 @@ impl Taskmaster {
                     }
                     "restart" => {
                         if let Some(arg) = input.get(1) {
-                            let mut queue = self.workQueue.lock().expect("Mutex Lock failed");
+                            let mut queue = self.work_queue.lock().expect("Mutex Lock failed");
                             queue.push(Instruction::Restart(vec![arg.to_string()]));
                         } else {
                             println!("Which program you want to restart ? ($ restart nginx)");
