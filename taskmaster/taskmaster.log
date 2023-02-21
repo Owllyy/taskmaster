@@ -1,11 +1,8 @@
 Configuration file successfully parsed
 Building all processus...
 Starting all 'autostart' processuses...
-Launching executioner...
-Staring the CLI
-    stoped process - 0 infinity
-    stoped process - 1 infinity
-    stoped process - 2 infinity
     started process - 0 infinity
     started process - 1 infinity
     started process - 2 infinity
+Launching executioner...
+Staring the CLI
