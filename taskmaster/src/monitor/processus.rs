@@ -1,10 +1,9 @@
 use std::process::{Child, Command};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::fmt;
 
 use crate::signal::Signal;
-use crate::{mode_t, Logger, umask, kill};
+use crate::{mode_t, umask, kill};
 
 #[derive(Debug)]
 pub enum Status {
@@ -31,7 +30,7 @@ pub struct Processus {
 }
 
 impl Processus {
-    pub fn build(id: usize, name: &str, retries: usize) -> Self {
+    pub fn new(id: usize, name: &str, retries: usize) -> Self {
         Self {
             id,
             name: name.to_owned(),
@@ -56,19 +55,18 @@ impl Processus {
         true
     }
 
-    pub fn stop_child(&mut self, signal: &String, logger: &Arc<Mutex<Logger>>) {
+    pub fn stop_child(&mut self, signal: &String) {
         let sid = Signal::parse(&signal).unwrap_or(Signal::SIGTERM);
         unsafe {
             if kill(self.child.as_mut().unwrap().id() as i32, sid as i32) < 0 {
-                panic!("Failed to kill process");
+                panic!("Failed to stop process");
             }
         }
         self.set_timer();
         self.status = Status::Stoping;
-        logger.lock().expect("Mutex lock failed").log(&format!("    stoped process - {} {}", self.id, self.name));
     }
 
-    pub fn start_child(&mut self, command: &mut Command, start_retries: usize, mask: mode_t, logger: &Arc<Mutex<Logger>>) {
+    pub fn start_child(&mut self, command: &mut Command, start_retries: usize, mask: mode_t) {
         let old_mask: mode_t;
         unsafe {
             old_mask = umask(mask);
@@ -80,7 +78,6 @@ impl Processus {
         self.set_timer();
         self.status = Status::Starting;
         self.retries = start_retries;
-        logger.lock().expect("Mutex lock failed").log(&format!("    started process - {} {}", self.id, self.name));
     }
 
     pub fn reset_child(&mut self) {

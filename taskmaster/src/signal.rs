@@ -1,5 +1,19 @@
 use std::error::Error;
 
+#[allow(non_camel_case_types)]
+pub type c_int = i32;
+#[allow(non_camel_case_types)]
+pub type sighandler_t = usize;
+
+extern "C" {
+    pub fn signal(
+        signum: c_int, 
+        handler: sighandler_t,
+    ) -> sighandler_t;
+}
+
+pub const SIG_IGN: usize = 1;
+
 #[repr(i32)]
 pub enum Signal {
     SIGHUP = 1,
