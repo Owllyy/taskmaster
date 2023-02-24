@@ -1,4 +1,4 @@
-use std::{io, fs::File};
+use std::{io, fs::File, error::Error};
 
 pub struct Logger {
     output: Box<dyn io::Write + Send + Sync>,
@@ -13,18 +13,17 @@ impl Default for Logger {
 }
 
 impl Logger {
-    pub fn new(file_path: &str) -> Self {
-        let output: Box<dyn io::Write + Send + Sync> = match File::create(file_path) {
+    pub fn new(file_path: &str) -> Result<Self, Box<dyn Error>> {
+        let output = match File::create(file_path) {
             Ok(file) => Box::new(file),
-            Err(_) => Box::new(io::stdout()),
+            Err(_) => Err("Failed to create/open the log file")?,
         };
-        Self {
+        Ok(Self {
             output
-        }
+        })
     }
 
-    pub fn log(&mut self, msg: &str) {
-        self.output.write(msg.as_bytes()).expect("Failed to log");
-        self.output.write(&[b'\n']).expect("Failed to log");
+    pub fn log(&mut self, msg: &str) -> io::Result<()> {
+        writeln!(self.output, "{}", msg)
     }
 }

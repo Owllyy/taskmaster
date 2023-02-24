@@ -8,11 +8,12 @@ pub struct Program {
 
 impl Program {
     pub fn build_command(&mut self) -> Result<(), Box<dyn Error>> {
-        let cmd: Vec<&str> = self.config.cmd.split_whitespace().collect();
+        let mut parts = self.config.cmd.split_whitespace();
+        let program_name = parts.next().ok_or("Missing program name")?;
         let output = self.fd_setup()?;
-        self.command = Some(Command::new(cmd.get(0).unwrap()));
+        self.command = Some(Command::new(program_name));
 
-        self.command.as_mut().unwrap().args(cmd.get(1).iter())
+        self.command.as_mut().unwrap().args(parts)
             .envs(self.config.env.iter())
             .current_dir(&self.config.workingdir)
             .stdout(output.0)
@@ -22,8 +23,8 @@ impl Program {
     }
 
     fn fd_setup(&self) -> Result<(Stdio, Stdio), Box<dyn Error>> {
-        let stdout = Stdio::from(File::open(&self.config.stdout).unwrap_or(File::create(&self.config.stdout)?));
-        let stderr = Stdio::from(File::open(&self.config.stderr).unwrap_or(File::create(&self.config.stderr)?));
+        let stdout = Stdio::from(File::create(&self.config.stdout)?);
+        let stderr = Stdio::from(File::create(&self.config.stderr)?);
 
         Ok((stdout, stderr))
     }

@@ -1,24 +1,24 @@
 pub mod processus;
 pub mod program;
 pub mod logger;
-pub mod work_queue;
+pub mod instruction;
 pub mod parsing;
 
 use std::error::Error;
 use std::collections::HashMap;
-use std::thread::{self};
+use std::sync::mpsc::Receiver;
+use std::thread;
+use std::time::Duration;
 use processus::{Status, Processus};
 use logger::Logger;
 use program::Program;
 use parsing::Parsing;
-use work_queue::{WorkQueue, Instruction};
+use instruction::Instruction;
 
-use crate::signal::{self, c_int, Signal, SIG_IGN};
+use crate::signal::Signal;
+use crate::sys::Libc;
 
-#[allow(non_camel_case_types)]
-type mode_t = u32;
-
-fn sig_handler(sig: c_int) {
+fn sig_handler(sig: i32) {
     println!("recieved sighup");
 }
 
@@ -26,19 +26,21 @@ pub struct Monitor {
     processus: Vec<Processus>,
     logger: Logger,
     programs: HashMap<String, Program>,
-    work_queue: WorkQueue,
 }
 
 impl Monitor {
-    pub fn new(work_queue: WorkQueue, file_path: &str) -> Result<Self, Box<dyn Error>> {
+    pub fn new(file_path: &str) -> Result<Self, Box<dyn Error>> {
         let mut programs = Parsing::parse(file_path)?;
-        let logger = Logger::new("taskmaster.log");
+        let logger = Logger::new("taskmaster.log")?;
         let mut processus: Vec<Processus> = Vec::new();
 
         let mut i = 0;
 
         for (name, program) in programs.iter_mut() {
-            program.build_command();
+            if let Err(err) = program.build_command() {
+                eprintln!("Program {}: {}", name, err.to_string());
+                continue;
+            }
             
             for id in 0..program.config.numprocs {
                 processus.push(Processus::new(i + id, name, program.config.startretries));
@@ -50,28 +52,27 @@ impl Monitor {
             processus,
             logger,
             programs,
-            work_queue,
         })
     }
 
-    pub fn execute(&mut self) {
-        unsafe {
-            signal::signal(Signal::SIGHUP as i32, sig_handler as usize);
-            signal::signal(Signal::SIGUSR1 as i32, SIG_IGN);
-            signal::signal(Signal::SIGUSR2 as i32, SIG_IGN);
+    pub fn execute(&mut self, receiver: Receiver<Instruction>) {
+        if let Err(_) = Libc::signal(Signal::SIGHUP, sig_handler) {
+            eprintln!("Signal function failed, taskmaster won't be able to handle SIGHUP");
         }
         self.autostart();
         loop {
-            if let Some(instruction) = self.work_queue.pop() {
+            if let Ok(instruction) = receiver.try_recv() {
                 match instruction {
                     Instruction::Status => self.status_command(),
                     Instruction::Start(programs) => self.start_command(programs),
                     Instruction::Stop(programs) => self.stop_command(programs),
                     Instruction::Restart(programs) => self.restart_command(programs),
                     Instruction::Reload(file_path) => self.reload(),
+                    Instruction::Exit => self.stop_all(),
                 }
             }
             self.monitor();
+            thread::sleep(Duration::from_millis(300));
         }
     }
 }
@@ -89,7 +90,9 @@ impl Monitor {
                                     //todo understand the double ref &&
                                     if (program.config.autorestart == "unexpected" && program.config.exitcodes.iter().find(|e| e == &&exitcode.code().expect("Failed to get exit code")) == None)
                                     || program.config.autorestart == "true" {
-                                        proc.start_child(program.command.as_mut().unwrap(), program.config.startretries, program.config.umask.parse::<mode_t>().expect("umask is in wrong format"));
+                                        if let Err(err) = proc.start_child(program.command.as_mut().unwrap(), program.config.startretries, program.config.umask.parse::<u32>().expect("umask is in wrong format")) {
+                                            eprintln!("{}", err.to_string());
+                                        }
                                     } else {
                                         proc.reset_child();
                                     }
@@ -103,7 +106,7 @@ impl Monitor {
                                         // maybe call the start proc function
                                         proc.child = Some(program.command.as_mut().expect("Command is not build").spawn().expect("Spawn failed"));
                                         proc.retries -= 1;
-                                        proc.set_timer();
+                                        proc.start_timer();
                                     } else {
                                         proc.reset_child();
                                     }
@@ -120,12 +123,12 @@ impl Monitor {
                                     panic!("The procesus is active but got the status Inactive");
                                 },
                                 Status::Starting => {
-                                    if proc.check_timer(program.config.starttime) {
+                                    if proc.is_timeout(program.config.starttime) {
                                         proc.status = Status::Active;
                                     }
                                 },
                                 Status::Stoping => {
-                                    if proc.check_timer(program.config.stoptime) {
+                                    if proc.is_timeout(program.config.stoptime) {
                                         proc.child.as_mut().expect("No child but status is Stoping").kill().expect("Failed to kill child");
                                         proc.child = None;
                                         proc.status = Status::Inactive;
@@ -150,7 +153,7 @@ impl Monitor {
         }
     }
 
-    fn status_command(&self) {
+    fn status_command(&mut self) {
         println!("{:-<55}", "-");
         println!("| {:^5} | {:^20} | {:^20} |", "ID", "NAME", "STATUS");
         println!("{:-<55}", "-");
@@ -160,13 +163,13 @@ impl Monitor {
         println!("{:-<55}", "-");
     }
 
-    fn start_command(&self, names: Vec<String>) {
+    fn start_command(&mut self, names: Vec<String>) {
         for name in names {
             let program = if let Some(program) = self.programs.get_mut(&name) {
                 program
             } else {
-                println!("Command not found: {name}");
-                break;
+                println!("Program not found: {name}");
+                continue;
             };
             for processus in self.processus.iter_mut().filter(|e| e.name == name) {
                 Monitor::start_processus(processus, program);
@@ -178,7 +181,9 @@ impl Monitor {
         if let Some(child) = processus.child.as_mut() {
             match child.try_wait() {
                 Ok(Some(_)) => {
-                    processus.start_child(program.command.as_mut().unwrap(), program.config.startretries, program.config.umask.parse::<mode_t>().expect("umask is in wrong format"));
+                    if let Err(err) = processus.start_child(program.command.as_mut().unwrap(), program.config.startretries, program.config.umask.parse::<u32>().expect("umask is in wrong format")) {
+                        eprintln!("{}", err.to_string());
+                    }
                 },
                 Ok(None) => {
                     println!("The program {} is already running", processus.name);
@@ -188,11 +193,14 @@ impl Monitor {
                 },
             };
         } else {
-            processus.start_child(program.command.as_mut().unwrap(), program.config.startretries, program.config.umask.parse::<mode_t>().expect("umask is in wrong format"));
+            // Need to do the umask transformation and verification once
+            if let Err(err) = processus.start_child(program.command.as_mut().unwrap(), program.config.startretries, program.config.umask.parse::<u32>().expect("umask is in wrong format")) {
+                eprintln!("{}", err.to_string());
+            }
         }
     }
 
-    fn stop_command(&self, names: Vec<String>) {
+    fn stop_command(&mut self, names: Vec<String>) {
         for name in names {
             let program = if let Some(program) = self.programs.get_mut(&name) {
                 program
@@ -213,7 +221,9 @@ impl Monitor {
                     println!("The program {} as stoped running, exit code : {exitstatus}", processus.name);
                 },
                 Ok(None) => {
-                    processus.stop_child(&program.config.stopsignal);
+                    if let Err(err) = processus.stop_child(program.config.stopsignal) {
+                        eprintln!("{}", err.to_string());
+                    }
                 }
                 Err(_) => {
                     panic!("try_wait() failed");
@@ -224,13 +234,13 @@ impl Monitor {
         }
     }
 
-    fn restart_command(&self, names: Vec<String>) {
-        //todo rework with a thread waiting the "Stoping" time to push the start_command
+    fn restart_command(&mut self, names: Vec<String>) {
+        // todo rework with a thread waiting the "Stoping" time to push the start_command
         self.stop_command(names.to_owned());
         self.start_command(names);
     }
 
-    fn autostart(&self) {
+    fn autostart(&mut self) {
         let mut to_start: Vec<String> = Vec::new();
         for (name, program) in self.programs.iter() {
             if program.config.autostart {
@@ -240,7 +250,7 @@ impl Monitor {
         self.start_command(to_start);
     }
 
-    fn stop_all(&self) {
+    fn stop_all(&mut self) {
         let mut to_stop = Vec::new();
         for (name, _) in self.programs.iter() {
             to_stop.push(name.to_owned());

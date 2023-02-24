@@ -3,6 +3,7 @@ use std::error::Error;
 use serde::Deserialize;
 
 use crate::monitor::program::Program;
+use crate::signal::Signal;
 
 #[derive(Deserialize, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
@@ -16,7 +17,7 @@ pub struct Task {
     pub exitcodes: Vec<i32>,
     pub startretries: usize,
     pub starttime: usize,
-    pub stopsignal: String,
+    pub stopsignal: Signal,
     pub stoptime: usize,
     pub stdout: String,
     pub stderr: String,

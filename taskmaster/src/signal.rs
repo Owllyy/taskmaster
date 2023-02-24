@@ -1,19 +1,8 @@
 use std::error::Error;
 
-#[allow(non_camel_case_types)]
-pub type c_int = i32;
-#[allow(non_camel_case_types)]
-pub type sighandler_t = usize;
+use serde::Deserialize;
 
-extern "C" {
-    pub fn signal(
-        signum: c_int, 
-        handler: sighandler_t,
-    ) -> sighandler_t;
-}
-
-pub const SIG_IGN: usize = 1;
-
+#[derive(Deserialize, Debug, Default, Copy, Clone)]
 #[repr(i32)]
 pub enum Signal {
     SIGHUP = 1,
@@ -30,6 +19,7 @@ pub enum Signal {
     SIGSYS = 12,
     SIGPIPE = 13,
     SIGALRM = 14,
+    #[default]
     SIGTERM = 15,
     SIGURG = 16,
     SIGSTOP = 17,

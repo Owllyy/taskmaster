@@ -1,9 +1,10 @@
+use std::error::Error;
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 use std::fmt;
 
 use crate::signal::Signal;
-use crate::{mode_t, umask, kill};
+use crate::sys::Libc;
 
 #[derive(Debug)]
 pub enum Status {
@@ -41,43 +42,27 @@ impl Processus {
         }
     }
 
-    pub fn set_timer(&mut self) {
+    pub fn start_timer(&mut self) {
         self.timer = Instant::now();
     }
 
-    pub fn check_timer(&self, duration: usize) -> bool {
-        let duration = Duration::from_secs(duration as u64);
-        
-        if self.timer.elapsed() < duration {
-            return false;
-        }
-
-        true
+    pub fn is_timeout(&self, duration: usize) -> bool {
+        Duration::from_secs(duration as u64) < self.timer.elapsed()
     }
 
-    pub fn stop_child(&mut self, signal: &String) {
-        let sid = Signal::parse(&signal).unwrap_or(Signal::SIGTERM);
-        unsafe {
-            if kill(self.child.as_mut().unwrap().id() as i32, sid as i32) < 0 {
-                panic!("Failed to stop process");
-            }
-        }
-        self.set_timer();
+    pub fn stop_child(&mut self, signal: Signal) -> Result<(), Box<dyn Error>> {
+        Libc::kill(&mut self.child, signal).map_err(|err| format!("Libc::kill function failed: {err}"))?;
+        self.start_timer();
         self.status = Status::Stoping;
+        Ok(())
     }
 
-    pub fn start_child(&mut self, command: &mut Command, start_retries: usize, mask: mode_t) {
-        let old_mask: mode_t;
-        unsafe {
-            old_mask = umask(mask);
-        }
-        self.child = Some(command.spawn().expect("Failed to spawn self"));
-        unsafe {
-            umask(old_mask);
-        }
-        self.set_timer();
+    pub fn start_child(&mut self, command: &mut Command, start_retries: usize, mask: u32) -> Result<(), Box<dyn Error>> {
+        self.child = Some(Libc::umask(command, mask).map_err(|err| format!("Libc::umask function failed: {err}"))?);
+        self.start_timer();
         self.status = Status::Starting;
         self.retries = start_retries;
+        Ok(())
     }
 
     pub fn reset_child(&mut self) {
