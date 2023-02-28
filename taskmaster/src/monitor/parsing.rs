@@ -1,5 +1,6 @@
 use std::{collections::HashMap, fs};
 use std::error::Error;
+use std::path::PathBuf;
 use serde::Deserialize;
 
 use crate::monitor::program::Program;
@@ -31,7 +32,7 @@ pub struct Parsing {
 }
 
 impl Parsing {
-    pub fn parse(file_path: &str) -> Result<HashMap<String, Program>, Box<dyn Error>> {
+    pub fn parse(file_path: &PathBuf) -> Result<HashMap<String, Program>, Box<dyn Error>> {
         let mut programs: HashMap<String, Program> = HashMap::new();
         let file_content = fs::read_to_string(file_path)?;
         let mut parsed: Parsing = serde_yaml::from_str(&file_content)?;

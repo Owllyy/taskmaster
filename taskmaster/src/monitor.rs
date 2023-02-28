@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::sync::mpsc::Receiver;
 use std::thread;
 use std::time::Duration;
+use std::path::PathBuf;
 use processus::{Status, Processus};
 use logger::Logger;
 use program::Program;
@@ -29,7 +30,7 @@ pub struct Monitor {
 }
 
 impl Monitor {
-    pub fn new(file_path: &str) -> Result<Self, Box<dyn Error>> {
+    pub fn new(file_path: &PathBuf) -> Result<Self, Box<dyn Error>> {
         let mut programs = Parsing::parse(file_path)?;
         let logger = Logger::new("taskmaster.log")?;
         let mut processus: Vec<Processus> = Vec::new();
@@ -78,6 +79,18 @@ impl Monitor {
 }
 
 impl Monitor {
+
+    fn log(&mut self, msg: &str, name: Option<&String>) {
+        let mut message = msg.to_string();
+        match name {
+            Some(name) => {message += " ";message += &name},
+            None => {},
+        }
+        match self.logger.log(&message) {
+            Ok(_) => {},
+            Err(e) => {eprintln!("Logger : {e}")},
+        }
+    }
 
     fn monitor(&mut self) {
         for (name, program) in self.programs.iter_mut() {
@@ -142,6 +155,7 @@ impl Monitor {
                         },
                     };
                 } else {
+                    //debug
                     match proc.status {
                         Status::Inactive => {},
                         _ => {
@@ -161,6 +175,7 @@ impl Monitor {
                 println!("| {:^5} | {:^20} | {:^20} |", proc.id, proc.name.chars().take(20).collect::<String>(), proc.status);
         }
         println!("{:-<55}", "-");
+        self.log("Displaying Status", None);
     }
 
     fn start_command(&mut self, names: Vec<String>) {
@@ -174,6 +189,7 @@ impl Monitor {
             for processus in self.processus.iter_mut().filter(|e| e.name == name) {
                 Monitor::start_processus(processus, program);
             }
+            self.log("Starting", Some(&name));
         }
     }
 
@@ -206,11 +222,12 @@ impl Monitor {
                 program
             } else {
                 println!("Unknown Program");
-                return;
+                continue;
             };
             for processus in self.processus.iter_mut().filter(|e| e.name == name) {
                 Monitor::stop_processus(processus, program);
             }
+            self.log("Stoping", Some(&name));
         }
     }
 
@@ -235,6 +252,7 @@ impl Monitor {
     }
 
     fn restart_command(&mut self, names: Vec<String>) {
+        self.log("Restarting", None);
         // todo rework with a thread waiting the "Stoping" time to push the start_command
         self.stop_command(names.to_owned());
         self.start_command(names);
@@ -258,7 +276,7 @@ impl Monitor {
         self.stop_command(to_stop);
     }
 
-    fn reload(&self) {
-
+    fn reload(&mut self) {
+        self.log("Reloading config file", None);
     }
 }

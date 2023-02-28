@@ -8,15 +8,16 @@ use std::io::{self};
 use std::sync::mpsc::{self, Sender};
 use std::{process, thread};
 use std::error::Error;
+use std::path::PathBuf;
 
 pub struct Taskmaster {
-    config_file_path: String,
+    config_file_path: PathBuf,
 }
 
 impl Taskmaster {
-    pub fn new(file_path: &str) -> Result<Self, Box<dyn Error>> {
+    pub fn new(file_path: PathBuf) -> Result<Self, Box<dyn Error>> {
         Ok(Taskmaster {
-            config_file_path: file_path.to_string(),
+            config_file_path: file_path,
         })
     }
 
