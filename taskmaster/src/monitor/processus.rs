@@ -6,7 +6,7 @@ use std::fmt;
 use crate::signal::Signal;
 use crate::sys::Libc;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Status {
     Starting,
     Stoping,

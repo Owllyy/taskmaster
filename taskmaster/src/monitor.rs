@@ -6,8 +6,9 @@ pub mod parsing;
 
 use std::error::Error;
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::sync::mpsc::{Sender, Receiver};
-use std::thread;
+use std::{thread, vec};
 use std::time::Duration;
 use std::path::PathBuf;
 use processus::{Status, Processus};
@@ -95,7 +96,7 @@ impl Monitor {
     }
 
     fn monitor(&mut self) {
-        for (name, program) in self.programs.iter() {
+        for (name, program) in self.programs.iter_mut() {
             for proc in self.processus.iter_mut().filter(|e| &e.name == name) {
                 if let Some(child) = proc.child.as_mut() {
                     match child.try_wait() {
@@ -119,6 +120,7 @@ impl Monitor {
                                     if (program.config.autorestart == "true")
                                     || (program.config.autorestart == "unexpected" && program.config.exitcodes.iter().find(|e| e == &&exitcode.code().expect("Failed to get exit code")) == None) {
                                         // maybe call the start proc function
+                                        // don't know if retries are used somewhere
                                         proc.child = Some(program.command.as_mut().expect("Command is not build").spawn().expect("Spawn failed"));
                                         proc.retries -= 1;
                                         proc.start_timer();
@@ -189,7 +191,9 @@ impl Monitor {
                 continue;
             };
             for processus in self.processus.iter_mut().filter(|e| e.name == name) {
-                Monitor::start_processus(processus, program);
+                if processus.status == Status::Inactive {
+                    Monitor::start_processus(processus, program);
+                }
             }
             self.log("Starting", Some(&name));
         }
@@ -254,8 +258,8 @@ impl Monitor {
     }
 
     fn restart_command(&mut self, names: Vec<String>, sender: &mut Sender<Instruction>) {
-        for name in names {
-            match self.programs.get(&name) {
+        for name in &names {
+            match self.programs.get(name) {
                 None => {
                     eprintln!("{} program not found", name);
                     return ;
@@ -296,16 +300,55 @@ impl Monitor {
     }
 
     fn reload(&mut self) {
-        let mut new_programs = match Parsing::parse(&self.config_file_path) {
+        let new_programs = match Parsing::parse(&self.config_file_path) {
             Ok(programs) => programs,
             Err(err) => {
                 self.log(&format!("Failed to reload config file: {}", err), None);
                 return;
             }
         };
-        for (name, program) in new_programs {
-            self.processus.iter_mut().filter(|e| e.name == name);
+        for (name, mut program) in new_programs {
+            // 1. Check all procs and if the conf hasn't changed do nothing
+            if self.programs.contains_key(&name) {
+                if self.programs.iter().filter(|e| e.0 == &name).next().unwrap().1.config == program.config {
+                    continue;
+                } else {
+                    // 2. If something has changed then restart the procs with the new config
+                    if let Err(err) = program.build_command() {
+                        eprintln!("Program {}: {}", name, err.to_string());
+                        continue;
+                    }
+                    self.stop_command(vec!(name.to_owned()));
+                    self.processus.retain(|e| &e.name != &name);
+                    let i: usize = if let Some(proc) = self.processus.last() {
+                        proc.id + 1
+                    } else {
+                        0
+                    };
+                    for id in 0..program.config.numprocs {
+                        self.processus.push(Processus::new(i + id, &name, program.config.startretries));
+                    }
+                    self.programs.insert(name, program);
+                }
+            } else {
+                // 3. If some new programs appeared we start tracking them and start if necessery
+                if let Err(err) = program.build_command() {
+                    eprintln!("Program {}: {}", name, err.to_string());
+                    continue;
+                }
+                let i: usize = if let Some(proc) = self.processus.last() {
+                    proc.id + 1
+                } else {
+                    0
+                };
+                for id in 0..program.config.numprocs {
+                    self.processus.push(Processus::new(i + id, &name, program.config.startretries));
+                }
+                self.programs.insert(name, program);
+            }
+            
         }
+        // 4. If some programs disapeared we stop the concerned procs and do not track them anymore
         self.log("Reloading config file", None);
     }
 }
