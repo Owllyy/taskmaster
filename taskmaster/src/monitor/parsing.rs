@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs};
 use std::error::Error;
 use std::path::PathBuf;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use crate::monitor::program::Program;
 use crate::signal::Signal;
@@ -11,7 +11,8 @@ use crate::signal::Signal;
 pub struct Task {
     pub cmd: String,
     pub numprocs: usize,
-    pub umask: String,
+    #[serde(deserialize_with = "umask_deserialize")]
+    pub umask: u32,
     pub workingdir: String,
     pub autostart: bool,
     pub autorestart: String,
@@ -23,6 +24,12 @@ pub struct Task {
     pub stdout: String,
     pub stderr: String,
     pub env: HashMap<String, String>,
+}
+
+fn umask_deserialize<'de, D>(deserializer: D) -> Result<u32, D::Error> where D: Deserializer<'de> {
+    let buf = String::deserialize(deserializer)?;
+
+    buf.parse::<u32>().map_err(serde::de::Error::custom)
 }
 
 #[derive(Deserialize)]

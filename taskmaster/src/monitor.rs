@@ -44,7 +44,6 @@ impl Monitor {
                 eprintln!("Program {}: {}", name, err.to_string());
                 continue;
             }
-            
             for id in 0..program.config.numprocs {
                 processus.push(Processus::new(i + id, name, program.config.startretries));
             }
@@ -59,7 +58,7 @@ impl Monitor {
         })
     }
 
-    pub fn execute(&mut self, receiver: Receiver<Instruction>, sender: Sender<Instruction>) {
+    pub fn execute(&mut self, receiver: Receiver<Instruction>, mut sender: Sender<Instruction>) {
         if let Err(_) = Libc::signal(Signal::SIGHUP, sig_handler) {
             eprintln!("Signal function failed, taskmaster won't be able to handle SIGHUP");
         }
@@ -83,18 +82,6 @@ impl Monitor {
 
 impl Monitor {
 
-    fn log(&mut self, msg: &str, name: Option<&String>) {
-        let mut message = msg.to_string();
-        match name {
-            Some(name) => {message += " ";message += &name},
-            None => {},
-        }
-        match self.logger.log(&message) {
-            Ok(_) => {},
-            Err(e) => {eprintln!("Logger : {e}")},
-        }
-    }
-
     fn monitor(&mut self) {
         for (name, program) in self.programs.iter_mut() {
             for proc in self.processus.iter_mut().filter(|e| &e.name == name) {
@@ -103,10 +90,9 @@ impl Monitor {
                         Ok(Some(exitcode)) => {
                             match proc.status {
                                 Status::Active => {
-                                    //todo understand the double ref &&
-                                    if (program.config.autorestart == "unexpected" && program.config.exitcodes.iter().find(|e| e == &&exitcode.code().expect("Failed to get exit code")) == None)
+                                    if (program.config.autorestart == "unexpected" && program.config.exitcodes.iter().find(|&&e| e == exitcode.code().expect("Failed to get exit code")) == None)
                                     || program.config.autorestart == "true" {
-                                        if let Err(err) = proc.start_child(program.command.as_mut().unwrap(), program.config.startretries, program.config.umask.parse::<u32>().expect("umask is in wrong format")) {
+                                        if let Err(err) = proc.start_child(program.command.as_mut().unwrap(), program.config.startretries, program.config.umask) {
                                             eprintln!("{}", err.to_string());
                                         }
                                     } else {
@@ -119,11 +105,13 @@ impl Monitor {
                                 Status::Starting => {
                                     if (program.config.autorestart == "true")
                                     || (program.config.autorestart == "unexpected" && program.config.exitcodes.iter().find(|e| e == &&exitcode.code().expect("Failed to get exit code")) == None) {
-                                        // maybe call the start proc function
-                                        // don't know if retries are used somewhere
-                                        proc.child = Some(program.command.as_mut().expect("Command is not build").spawn().expect("Spawn failed"));
-                                        proc.retries -= 1;
-                                        proc.start_timer();
+                                        if proc.retries > 0 {
+                                            proc.child = Some(program.command.as_mut().expect("Command is not build").spawn().expect("Spawn failed"));
+                                            proc.retries -= 1;
+                                            proc.start_timer();
+                                        } else {
+                                            self.logger.log(&format!("Fail to start {} properly, no attempt left", name));
+                                        }
                                     } else {
                                         proc.reset_child();
                                     }
@@ -179,7 +167,7 @@ impl Monitor {
                 println!("| {:^5} | {:^20} | {:^20} |", proc.id, proc.name.chars().take(20).collect::<String>(), proc.status);
         }
         println!("{:-<55}", "-");
-        self.log("Displaying Status", None);
+        self.logger.log("Displaying Status");
     }
 
     fn start_command(&mut self, names: Vec<String>) {
@@ -195,7 +183,7 @@ impl Monitor {
                     Monitor::start_processus(processus, program);
                 }
             }
-            self.log("Starting", Some(&name));
+            self.logger.log(&format!("Starting {}", &name));
         }
     }
 
@@ -203,7 +191,7 @@ impl Monitor {
         if let Some(child) = processus.child.as_mut() {
             match child.try_wait() {
                 Ok(Some(_)) => {
-                    if let Err(err) = processus.start_child(program.command.as_mut().unwrap(), program.config.startretries, program.config.umask.parse::<u32>().expect("umask is in wrong format")) {
+                    if let Err(err) = processus.start_child(program.command.as_mut().unwrap(), program.config.startretries, program.config.umask) {
                         eprintln!("{}", err.to_string());
                     }
                 },
@@ -216,7 +204,7 @@ impl Monitor {
             };
         } else {
             // Need to do the umask transformation and verification once
-            if let Err(err) = processus.start_child(program.command.as_mut().unwrap(), program.config.startretries, program.config.umask.parse::<u32>().expect("umask is in wrong format")) {
+            if let Err(err) = processus.start_child(program.command.as_mut().unwrap(), program.config.startretries, program.config.umask) {
                 eprintln!("{}", err.to_string());
             }
         }
@@ -233,7 +221,7 @@ impl Monitor {
             for processus in self.processus.iter_mut().filter(|e| e.name == name) {
                 Monitor::stop_processus(processus, program);
             }
-            self.log("Stoping", Some(&name));
+            self.logger.log(&format!("Stoping {}", &name));
         }
     }
 
@@ -268,7 +256,7 @@ impl Monitor {
             }
         }
 
-        self.log("Restarting", None);
+        self.logger.log("Restarting");
         self.stop_command(names.to_owned());
         
         for name in names.to_owned() {
@@ -303,7 +291,7 @@ impl Monitor {
         let new_programs = match Parsing::parse(&self.config_file_path) {
             Ok(programs) => programs,
             Err(err) => {
-                self.log(&format!("Failed to reload config file: {}", err), None);
+                self.logger.log(&format!("Failed to reload config file: {}", err));
                 return;
             }
         };
@@ -349,6 +337,6 @@ impl Monitor {
             
         }
         // 4. If some programs disapeared we stop the concerned procs and do not track them anymore
-        self.log("Reloading config file", None);
+        self.logger.log("Reloading config file");
     }
 }
