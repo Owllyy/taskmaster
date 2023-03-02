@@ -23,9 +23,10 @@ impl Taskmaster {
 
     pub fn execute(mut self) -> Result<(), Box<dyn Error>> {
         let (sender, receiver) = mpsc::channel::<Instruction>();
+        let sender_clone = sender.clone();
         let mut monitor = Monitor::new(&self.config_file_path)?;
         thread::spawn(move || {
-            monitor.execute(receiver);
+            monitor.execute(receiver, sender_clone);
         });
         self.cli(sender);
         Ok(())

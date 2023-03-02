@@ -2,7 +2,7 @@ use std::error::Error;
 
 use serde::Deserialize;
 
-#[derive(Deserialize, Debug, Default, Copy, Clone)]
+#[derive(Deserialize, Debug, Default, Copy, Clone, PartialEq)]
 #[repr(i32)]
 pub enum Signal {
     SIGHUP = 1,

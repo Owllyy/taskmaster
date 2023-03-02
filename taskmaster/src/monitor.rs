@@ -6,7 +6,7 @@ pub mod parsing;
 
 use std::error::Error;
 use std::collections::HashMap;
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Sender, Receiver};
 use std::thread;
 use std::time::Duration;
 use std::path::PathBuf;
@@ -24,6 +24,7 @@ fn sig_handler(sig: i32) {
 }
 
 pub struct Monitor {
+    config_file_path: PathBuf,
     processus: Vec<Processus>,
     logger: Logger,
     programs: HashMap<String, Program>,
@@ -50,13 +51,14 @@ impl Monitor {
         }
         
         Ok(Monitor {
+            config_file_path: file_path.to_owned(),
             processus,
             logger,
             programs,
         })
     }
 
-    pub fn execute(&mut self, receiver: Receiver<Instruction>) {
+    pub fn execute(&mut self, receiver: Receiver<Instruction>, sender: Sender<Instruction>) {
         if let Err(_) = Libc::signal(Signal::SIGHUP, sig_handler) {
             eprintln!("Signal function failed, taskmaster won't be able to handle SIGHUP");
         }
@@ -67,7 +69,7 @@ impl Monitor {
                     Instruction::Status => self.status_command(),
                     Instruction::Start(programs) => self.start_command(programs),
                     Instruction::Stop(programs) => self.stop_command(programs),
-                    Instruction::Restart(programs) => self.restart_command(programs),
+                    Instruction::Restart(programs) => self.restart_command(programs, &mut sender),
                     Instruction::Reload(file_path) => self.reload(),
                     Instruction::Exit => self.stop_all(),
                 }
@@ -93,7 +95,7 @@ impl Monitor {
     }
 
     fn monitor(&mut self) {
-        for (name, program) in self.programs.iter_mut() {
+        for (name, program) in self.programs.iter() {
             for proc in self.processus.iter_mut().filter(|e| &e.name == name) {
                 if let Some(child) = proc.child.as_mut() {
                     match child.try_wait() {
@@ -251,11 +253,28 @@ impl Monitor {
         }
     }
 
-    fn restart_command(&mut self, names: Vec<String>) {
+    fn restart_command(&mut self, names: Vec<String>, sender: &mut Sender<Instruction>) {
+        for name in names {
+            match self.programs.get(&name) {
+                None => {
+                    eprintln!("{} program not found", name);
+                    return ;
+            },
+                _ => {},
+            }
+        }
+
         self.log("Restarting", None);
-        // todo rework with a thread waiting the "Stoping" time to push the start_command
         self.stop_command(names.to_owned());
-        self.start_command(names);
+        
+        for name in names.to_owned() {
+            let duration = Duration::new(self.programs.get(&name).expect("program not found").config.stoptime as u64, 0);
+            let sender = sender.clone();
+            thread::spawn(move || {
+                thread::sleep(duration);
+                sender.send(Instruction::Start(vec!(name)));
+            });
+        }
     }
 
     fn autostart(&mut self) {
@@ -277,6 +296,16 @@ impl Monitor {
     }
 
     fn reload(&mut self) {
+        let mut new_programs = match Parsing::parse(&self.config_file_path) {
+            Ok(programs) => programs,
+            Err(err) => {
+                self.log(&format!("Failed to reload config file: {}", err), None);
+                return;
+            }
+        };
+        for (name, program) in new_programs {
+            self.processus.iter_mut().filter(|e| e.name == name);
+        }
         self.log("Reloading config file", None);
     }
 }

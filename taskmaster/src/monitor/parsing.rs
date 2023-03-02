@@ -6,7 +6,7 @@ use serde::Deserialize;
 use crate::monitor::program::Program;
 use crate::signal::Signal;
 
-#[derive(Deserialize, Debug, Default)]
+#[derive(Deserialize, Debug, Default, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub struct Task {
     pub cmd: String,
