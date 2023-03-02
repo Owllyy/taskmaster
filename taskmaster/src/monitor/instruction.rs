@@ -6,6 +6,7 @@ pub enum Instruction {
     Stop(Vec<String>),
     Restart(Vec<String>),
     Reload(String),
+    Remove(Vec<usize>),
     Exit,
 }
 

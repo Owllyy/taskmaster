@@ -71,10 +71,11 @@ impl Monitor {
                     Instruction::Stop(programs) => self.stop_command(programs),
                     Instruction::Restart(programs) => self.restart_command(programs, &mut sender),
                     Instruction::Reload(file_path) => self.reload(),
+                    Instruction::Remove(ids) => self.remove_processus(ids),
                     Instruction::Exit => self.stop_all(),
                 }
             }
-            self.monitor();
+            self.monitor(sender.clone());
             thread::sleep(Duration::from_millis(300));
         }
     }
@@ -82,7 +83,7 @@ impl Monitor {
 
 impl Monitor {
 
-    fn monitor(&mut self) {
+    fn monitor(&mut self, sender: Sender<Instruction>) {
         for (name, program) in self.programs.iter_mut() {
             for proc in self.processus.iter_mut().filter(|e| &e.name == name) {
                 if let Some(child) = proc.child.as_mut() {
@@ -121,7 +122,6 @@ impl Monitor {
                                     proc.reset_child();
                                 },
                                 Status::Remove => {
-                                    
                                 }
                             }
                         },
