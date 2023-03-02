@@ -6,11 +6,12 @@ pub mod parsing;
 
 use std::error::Error;
 use std::collections::HashMap;
-use std::ops::Deref;
+use std::io;
 use std::sync::mpsc::{Sender, Receiver};
 use std::{thread, vec};
 use std::time::Duration;
 use std::path::PathBuf;
+use std::process::ExitStatus;
 use processus::{Status, Processus};
 use logger::Logger;
 use program::Program;
@@ -72,6 +73,11 @@ impl Monitor {
                     Instruction::Restart(programs) => self.restart_command(programs, &mut sender),
                     Instruction::Reload(file_path) => self.reload(),
                     Instruction::Remove(ids) => self.remove_processus(ids),
+                    Instruction::StartProcessus(String, usize) => self.reload(),
+                    Instruction::ResetProcessus(String, usize) => self.reload(),
+                    Instruction::RetryStartProcessus(String, usize) => self.reload(),
+                    Instruction::SetStatus(String, usize, String) => self.reload(),
+                    Instruction::KillProcessus(String, usize) => self.reload(),
                     Instruction::Exit => self.stop_all(),
                 }
             }
@@ -83,89 +89,126 @@ impl Monitor {
 
 impl Monitor {
 
-    fn monitor(&mut self, sender: Sender<Instruction>) {
-        for (name, program) in self.programs.iter_mut() {
-            for proc in self.processus.iter_mut().filter(|e| &e.name == name) {
-                if let Some(child) = proc.child.as_mut() {
-                    match child.try_wait() {
-                        Ok(Some(exitcode)) => {
-                            match proc.status {
-                                Status::Active => {
-                                    if (program.config.autorestart == "unexpected" && program.config.exitcodes.iter().find(|&&e| e == exitcode.code().expect("Failed to get exit code")) == None)
-                                    || program.config.autorestart == "true" {
-                                        if let Err(err) = proc.start_child(program.command.as_mut().unwrap(), program.config.startretries, program.config.umask) {
-                                            eprintln!("{}", err.to_string());
-                                        }
-                                    } else {
-                                        proc.reset_child();
-                                    }
-                                },
-                                Status::Inactive => {
-                                    panic!("Child exist but the status is Inactive");
-                                },
-                                Status::Starting => {
-                                    if (program.config.autorestart == "true")
-                                    || (program.config.autorestart == "unexpected" && program.config.exitcodes.iter().find(|e| e == &&exitcode.code().expect("Failed to get exit code")) == None) {
-                                        if proc.retries > 0 {
-                                            proc.child = Some(program.command.as_mut().expect("Command is not build").spawn().expect("Spawn failed"));
-                                            proc.retries -= 1;
-                                            proc.start_timer();
-                                        } else {
-                                            self.logger.log(&format!("Fail to start {} properly, no attempt left", name));
-                                        }
-                                    } else {
-                                        proc.reset_child();
-                                    }
-                                },
-                                Status::Stoping => {
-                                    // Donno if this is good
-                                    proc.reset_child();
-                                },
-                                Status::Remove => {
-                                }
-                            }
-                        },
-                        Ok(None) => {
-                            match proc.status {
-                                Status::Inactive => {
-                                    panic!("The procesus is active but got the status Inactive");
-                                },
-                                Status::Starting => {
-                                    if proc.is_timeout(program.config.starttime) {
-                                        proc.status = Status::Active;
-                                    }
-                                },
-                                Status::Stoping => {
-                                    if proc.is_timeout(program.config.stoptime) {
-                                        proc.child.as_mut().expect("No child but status is Stoping").kill().expect("Failed to kill child");
-                                        proc.child = None;
-                                        proc.status = Status::Inactive;
-                                    }
-                                },
-                                Status::Remove => {
-                                    if proc.is_timeout(program.config.stoptime) {
-                                        proc.child.as_mut().expect("No child but status is Stoping").kill().expect("Failed to kill child");
-                                        
-                                    }
-                                },
-                                _ => {},
-                            }
-                        },
-                        Err(_) => {
-                            panic!("try wait failed");
-                        },
-                    };
+    fn Retry_Start_Child() {
+        if proc.retries > 0 {
+            proc.child = Some(program.command.as_mut().expect("Command is not build").spawn().expect("Spawn failed"));
+            proc.retries -= 1;
+            proc.start_timer();
+        } else {
+            self.logger.log(&format!("Fail to start {} properly, no attempt left", name));
+        }
+    }
+
+    fn monitor_active_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
+        match exit_code {
+            Some(code) => {
+                if (program.config.autorestart == "unexpected"
+                && program.config.exitcodes.iter().find(|&&e| e == code.code().expect("Failed to get exit code")) == None)
+                || program.config.autorestart == "true" {
+                    return Some(Instruction::StartProcessus(processus.name, processus.id))
                 } else {
-                    //debug
-                    match proc.status {
-                        Status::Inactive => {},
-                        _ => {
-                            panic!("Status is set but there is no child");
-                        },
-                    }
+                    return Some(Instruction::ResetProcessus(processus.name, processus.id))
+                }
+            },
+            _ => {return None},
+        }
+        
+    }
+
+    fn monitor_inactive_processus(processus: &Processus) {
+        panic!("Child exist but the processus {} {} status is Inactive", processus.id, processus.name);
+    }
+
+    fn monitor_starting_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
+        match exit_code {
+            Some(code) => {
+                if (program.config.autorestart == "true")
+                || (program.config.autorestart == "unexpected"
+                && program.config.exitcodes.iter().find(|&&e| e == code.code().expect("Failed to get exit code")) == None) {
+                    return Some(Instruction::RetryStartProcessus(processus.name, processus.id))
+                } else {
+                    return Some(Instruction::ResetProcessus(processus.name, processus.id))
+                }
+            },
+            None => {
+                if processus.is_timeout(program.config.starttime) {
+                    return Some(Instruction::SetStatus(processus.name, processus.id, "Active".to_string()))
+                }
+                None
+            },
+        }
+    }
+
+    fn monitor_stoping_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
+        match exit_code {
+            Some(code) => {
+                return Some(Instruction::ResetProcessus(processus.name, processus.id))
+            },
+            None => {
+                if processus.is_timeout(program.config.stoptime) {
+                    return Some(Instruction::KillProcessus(processus.name, processus.id))
+                }
+                return None
+            },
+        }
+    }
+
+    fn monitor_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
+        match processus.status {
+            Status::Active => {return Self::monitor_active_processus(program, processus, exit_code)},
+            Status::Inactive => {Self::monitor_inactive_processus(processus)},
+            Status::Starting => {return Self::monitor_starting_processus(program, processus, exit_code)},
+            Status::Stoping => {return Self::monitor_stoping_processus(program, processus, exit_code)},
+            _ => {},
+        };
+        None
+    }
+
+    fn monitor_remove(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<usize> {
+        match exit_code {
+            Some(code) => {return Some(processus.id)},
+            None => {
+                if processus.is_timeout(program.config.stoptime) {
+                    return Some(processus.id)
+                }
+            },
+        }
+        None
+    }
+
+    fn monitor(&mut self, sender: Sender<Instruction>) -> Vec<Instruction> {
+        let instructions = Vec::new();
+        let processus_to_remove = Vec::new();
+
+        for processus in self.processus.iter() {
+            if let Some(child) = processus.child.as_mut() {
+                match child.try_wait() {
+                    Err(_) => panic!("Try_wait failed on processus {} {}", processus.id, processus.name),
+                    e => {
+                        if let Some(instruction) = Self::monitor_processus(self.programs.get(&processus.name).unwrap(), processus, e.unwrap()) {
+                            if processus.status == Status::Remove {
+                                if let Some(id) = Self::monitor_remove(self.programs.get(&processus.name).unwrap(), processus, e.unwrap()) {
+                                    processus_to_remove.push(id);
+                                }
+                            } else {
+                                instructions.push(instruction);
+                            }
+                        }
+                    },
+                };
+            } else {
+                match processus.status {
+                    Status::Inactive => {},
+                    _ => {
+                        panic!("Status is set but processus {} {} has no child", processus.name, processus.id);
+                    },
                 }
             }
         }
+        if processus_to_remove.len() > 0 {
+            instructions.push(Instruction::Remove(processus_to_remove))
+        }
+        instructions
     }
 
     fn status_command(&mut self) {
@@ -212,7 +255,6 @@ impl Monitor {
                 },
             };
         } else {
-            // Need to do the umask transformation and verification once
             if let Err(err) = processus.start_child(program.command.as_mut().unwrap(), program.config.startretries, program.config.umask) {
                 eprintln!("{}", err.to_string());
             }

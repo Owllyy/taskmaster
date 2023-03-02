@@ -7,6 +7,11 @@ pub enum Instruction {
     Restart(Vec<String>),
     Reload(String),
     Remove(Vec<usize>),
+    StartProcessus(String, usize),
+    ResetProcessus(String, usize),
+    RetryStartProcessus(String, usize),
+    SetStatus(String, usize, String),
+    KillProcessus(String, usize),
     Exit,
 }
 
