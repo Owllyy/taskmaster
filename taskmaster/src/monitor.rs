@@ -132,6 +132,9 @@ impl Monitor {
                                     // Donno if this is good
                                     proc.reset_child();
                                 },
+                                Status::Remove => {
+                                    
+                                }
                             }
                         },
                         Ok(None) => {
@@ -149,6 +152,12 @@ impl Monitor {
                                         proc.child.as_mut().expect("No child but status is Stoping").kill().expect("Failed to kill child");
                                         proc.child = None;
                                         proc.status = Status::Inactive;
+                                    }
+                                },
+                                Status::Remove => {
+                                    if proc.is_timeout(program.config.stoptime) {
+                                        proc.child.as_mut().expect("No child but status is Stoping").kill().expect("Failed to kill child");
+                                        
                                     }
                                 },
                                 _ => {},
@@ -298,7 +307,7 @@ impl Monitor {
         }
         self.stop_command(to_stop);
     }
-
+    
     fn reload(&mut self) {
         let new_programs = match Parsing::parse(&self.config_file_path) {
             Ok(programs) => programs,
@@ -307,13 +316,20 @@ impl Monitor {
                 return;
             }
         };
+        // 1. If some programs disapeared we stop the concerned procs and do not track them anymore
+        let mut to_stop: Vec<String> = Vec::new();
+        for (name, _) in self.programs.iter_mut().filter(|e| !new_programs.contains_key(e.0)) {
+            to_stop.push(name.to_owned());
+            self.processus.retain(|e| &e.name != name);
+        }
+        self.stop_command(to_stop);
         for (name, mut program) in new_programs {
-            // 1. Check all procs and if the conf hasn't changed do nothing
             if self.programs.contains_key(&name) {
+                // 2. Check all progs and if the conf hasn't changed do nothing
                 if self.programs.iter().filter(|e| e.0 == &name).next().unwrap().1.config == program.config {
                     continue;
                 } else {
-                    // 2. If something has changed then restart the procs with the new config
+                    // 3. If something has changed then restart the procs with the new config
                     if let Err(err) = program.build_command() {
                         eprintln!("Program {}: {}", name, err.to_string());
                         continue;
@@ -331,7 +347,7 @@ impl Monitor {
                     self.programs.insert(name, program);
                 }
             } else {
-                // 3. If some new programs appeared we start tracking them and start if necessery
+                // 4. If some new programs appeared we start tracking them and start if necessery
                 if let Err(err) = program.build_command() {
                     eprintln!("Program {}: {}", name, err.to_string());
                     continue;
@@ -346,9 +362,7 @@ impl Monitor {
                 }
                 self.programs.insert(name, program);
             }
-            
         }
-        // 4. If some programs disapeared we stop the concerned procs and do not track them anymore
         self.log("Reloading config file", None);
     }
 }
