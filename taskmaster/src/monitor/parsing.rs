@@ -8,7 +8,7 @@ use crate::signal::Signal;
 
 #[derive(Deserialize, Debug, Default, PartialEq)]
 #[serde(deny_unknown_fields, default)]
-pub struct Task {
+pub struct Config {
     pub cmd: String,
     pub numprocs: usize,
     #[serde(deserialize_with = "umask_deserialize")]
@@ -35,7 +35,7 @@ fn umask_deserialize<'de, D>(deserializer: D) -> Result<u32, D::Error> where D: 
 #[derive(Deserialize)]
 pub struct Parsing {
     #[serde(flatten)]
-    pub tasks: HashMap<String, Task>,
+    pub tasks: HashMap<String, Config>,
 }
 
 impl Parsing {

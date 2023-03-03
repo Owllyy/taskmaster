@@ -21,6 +21,8 @@ use instruction::Instruction;
 use crate::signal::Signal;
 use crate::sys::Libc;
 
+use self::processus::id::Id;
+
 fn sig_handler(sig: i32) {
     println!("recieved sighup");
 }
@@ -46,7 +48,7 @@ impl Monitor {
                 continue;
             }
             for id in 0..program.config.numprocs {
-                processus.push(Processus::new(i + id, name, program.config.startretries));
+                processus.push(Processus::new(name, program));
             }
             i += program.config.numprocs;
         }
@@ -223,7 +225,7 @@ impl Monitor {
         }
     }
 
-    fn monitor_remove(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<usize> {
+    fn monitor_remove(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Id> {
         match exit_code {
             Some(code) => {return Some(processus.id)},
             None => {
@@ -403,13 +405,8 @@ impl Monitor {
                     }
                     self.stop_command(vec!(name.to_owned()));
                     self.processus.retain(|e| &e.name != &name);
-                    let i: usize = if let Some(proc) = self.processus.last() {
-                        proc.id + 1
-                    } else {
-                        0
-                    };
                     for id in 0..program.config.numprocs {
-                        self.processus.push(Processus::new(i + id, &name, program.config.startretries));
+                        self.processus.push(Processus::new(&name, &program));
                     }
                     self.programs.insert(name, program);
                 }
@@ -419,13 +416,8 @@ impl Monitor {
                     eprintln!("Program {}: {}", name, err.to_string());
                     continue;
                 }
-                let i: usize = if let Some(proc) = self.processus.last() {
-                    proc.id + 1
-                } else {
-                    0
-                };
                 for id in 0..program.config.numprocs {
-                    self.processus.push(Processus::new(i + id, &name, program.config.startretries));
+                    self.processus.push(Processus::new(&name, &program));
                 }
                 self.programs.insert(name, program);
             }

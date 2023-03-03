@@ -6,6 +6,12 @@ use std::fmt;
 use crate::signal::Signal;
 use crate::sys::Libc;
 
+use self::id::Id;
+
+use super::program::Program;
+
+pub mod id;
+
 #[derive(Debug, PartialEq)]
 pub enum Status {
     Starting,
@@ -23,7 +29,7 @@ impl fmt::Display for Status {
 }
 
 pub struct Processus {
-    pub id: usize,
+    pub id: Id,
     pub name: String,
     pub child: Option<Child>,
     pub retries: usize,
@@ -32,12 +38,12 @@ pub struct Processus {
 }
 
 impl Processus {
-    pub fn new(id: usize, name: &str, retries: usize) -> Self {
+    pub fn new(name: &str, program: &Program) -> Self {
         Self {
-            id,
+            id: Default::default(),
             name: name.to_owned(),
             child: None,
-            retries,
+            retries: program.config.startretries,
             timer: Instant::now(),
             status: Status::Inactive,
         }
