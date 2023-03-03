@@ -18,7 +18,7 @@ pub enum Status {
     Stoping,
     Active,
     Inactive,
-    Remove,
+    Remove(bool),
 }
 
 impl fmt::Display for Status {

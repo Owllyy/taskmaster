@@ -6,7 +6,7 @@ pub mod parsing;
 
 use std::error::Error;
 use std::collections::{HashMap, VecDeque};
-use std::io;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Sender, Receiver};
 use std::{thread, vec};
 use std::time::Duration;
@@ -19,12 +19,12 @@ use parsing::Parsing;
 use instruction::Instruction;
 
 use crate::signal::Signal;
-use crate::sys::Libc;
+use crate::sys::{Libc, self};
 
 use self::processus::id::Id;
 
 fn sig_handler(sig: i32) {
-    println!("recieved sighup");
+    sys::RELOAD_INSTRUCTION.store(true, Ordering::Relaxed);
 }
 
 pub struct Monitor {
@@ -70,6 +70,10 @@ impl Monitor {
         let instruction_queue = VecDeque::new();
         
         loop {
+            if sys::RELOAD_INSTRUCTION.load(Ordering::Relaxed) {
+                instruction_queue.push_front(Instruction::Reload);
+                sys::RELOAD_INSTRUCTION.store(false, Ordering::Relaxed);
+            }
             if let Ok(instruction) = receiver.try_recv() {
                 instruction_queue.push_back(instruction);
             }
@@ -80,7 +84,7 @@ impl Monitor {
                     Instruction::Start(programs) => self.start_command(programs),
                     Instruction::Stop(programs) => self.stop_command(programs),
                     Instruction::Restart(programs) => self.restart_command(programs, &mut sender),
-                    Instruction::Reload(file_path) => self.reload(),
+                    Instruction::Reload => self.reload(),
                     // Instruction not from Cli
                     Instruction::RemoveProcessus(id) => self.remove_processus(id),
                     Instruction::StartProcessus(id) => self.reload(),
@@ -99,11 +103,11 @@ impl Monitor {
 }
 
 impl Monitor {
-    fn get_processus(&self, id: usize) -> Option<&mut Processus> {
+    fn get_processus(&self, id: Id) -> Option<&mut Processus> {
         self.processus.iter_mut().find(|processus| processus.id == id)
     }
 
-    fn kill_processus(&self, id: usize) {
+    fn kill_processus(&self, id: Id) {
         let processus = self.get_processus(id);
 
         if let Some(processus) = processus{
@@ -117,7 +121,7 @@ impl Monitor {
         }
     }
 
-    fn set_status(&self, id: usize, status: Status) {
+    fn set_status(&self, id: Id, status: Status) {
         let processus = self.get_processus(id);
 
         if let Some(processus) = processus {
@@ -125,7 +129,7 @@ impl Monitor {
         }
     }
 
-    fn start_processus(&self, id: usize) {
+    fn start_processus(&self, id: Id) {
         if let Some(processus) = self.get_processus(id) {
             if processus.retries > 0 {
                 if let Some(program) = self.programs.get(&processus.name) {
@@ -181,7 +185,7 @@ impl Monitor {
             },
             None => {
                 if processus.is_timeout(program.config.starttime) {
-                    return Some(Instruction::SetStatus(processus.id, "Active".to_string()))
+                    return Some(Instruction::SetStatus(processus.id, Status::Active))
                 }
                 None
             },
@@ -330,8 +334,6 @@ impl Monitor {
                     panic!("try_wait() failed");
                 },
             };
-        } else {
-            println!("The program {} is not running", processus.name);
         }
     }
 
