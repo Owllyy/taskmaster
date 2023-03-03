@@ -1,6 +1,6 @@
-use std::fmt;
+use std::{fmt, sync::atomic::{AtomicUsize, Ordering}};
 
-static mut id: usize = 0;
+static ID: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(PartialEq, Clone, Copy)]
 pub struct Id {
@@ -17,8 +17,8 @@ impl Default for Id {
     fn default() -> Self {
         let id_value;
         unsafe {
-            id_value = id;
-            id += 1;
+            id_value = ID.load(Ordering::Relaxed);
+            ID.store(id_value, Ordering::Relaxed);
         }
         Self {
             value: id_value,

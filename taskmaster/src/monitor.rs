@@ -6,6 +6,7 @@ pub mod parsing;
 
 use std::error::Error;
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Sender, Receiver};
 use std::{thread, vec};
 use std::time::Duration;
@@ -18,12 +19,12 @@ use parsing::Parsing;
 use instruction::Instruction;
 
 use crate::signal::Signal;
-use crate::sys::Libc;
+use crate::sys::{Libc, self};
 
 use self::processus::id::Id;
 
-fn sig_handler(_: i32) {
-    println!("recieved sighup");
+fn sig_handler(sig: i32) {
+    sys::RELOAD_INSTRUCTION.store(true, Ordering::Relaxed);
 }
 
 pub struct Monitor {
@@ -66,6 +67,10 @@ impl Monitor {
         let mut instruction_queue = VecDeque::new();
         
         loop {
+            if sys::RELOAD_INSTRUCTION.load(Ordering::Relaxed) {
+                instruction_queue.push_front(Instruction::Reload);
+                sys::RELOAD_INSTRUCTION.store(false, Ordering::Relaxed);
+            }
             if let Ok(instruction) = receiver.try_recv() {
                 instruction_queue.push_back(instruction);
             }
@@ -76,7 +81,7 @@ impl Monitor {
                     Instruction::Start(programs) => self.start_command(programs),
                     Instruction::Stop(programs) => self.stop_command(programs),
                     Instruction::Restart(programs) => self.restart_command(programs, &mut sender),
-                    Instruction::Reload(file_path) => self.reload(),
+                    Instruction::Reload => self.reload(),
                     // Instruction not from Cli
                     Instruction::RemoveProcessus(id, is_remove) => self.remove_processus(id, is_remove),
                     Instruction::StartProcessus(id) => self.start_processus(id),
@@ -340,8 +345,6 @@ impl Monitor {
                     panic!("try_wait() failed");
                 },
             };
-        } else {
-            println!("The program {} is not running", processus.name);
         }
     }
 

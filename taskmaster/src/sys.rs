@@ -1,4 +1,4 @@
-use std::{error::Error, process::{Child, Command}};
+use std::{error::Error, process::{Child, Command}, sync::atomic::AtomicBool};
 use crate::signal::Signal;
 
 extern "C" {
@@ -11,6 +11,8 @@ extern "C" {
 }
 
 const SIG_ERR: usize = 18_446_744_073_709_551_615usize;
+
+pub static RELOAD_INSTRUCTION: AtomicBool = AtomicBool::new(false);
 
 pub struct Libc;
 
