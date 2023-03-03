@@ -6,7 +6,6 @@ pub mod parsing;
 
 use std::error::Error;
 use std::collections::{HashMap, VecDeque};
-use std::io;
 use std::sync::mpsc::{Sender, Receiver};
 use std::{thread, vec};
 use std::time::Duration;
@@ -23,7 +22,7 @@ use crate::sys::Libc;
 
 use self::processus::id::Id;
 
-fn sig_handler(sig: i32) {
+fn sig_handler(_: i32) {
     println!("recieved sighup");
 }
 
@@ -40,17 +39,14 @@ impl Monitor {
         let logger = Logger::new("taskmaster.log")?;
         let mut processus: Vec<Processus> = Vec::new();
 
-        let mut i = 0;
-
         for (name, program) in programs.iter_mut() {
             if let Err(err) = program.build_command() {
                 eprintln!("Program {}: {}", name, err.to_string());
                 continue;
             }
-            for id in 0..program.config.numprocs {
+            for _ in 0..program.config.numprocs {
                 processus.push(Processus::new(name, program));
             }
-            i += program.config.numprocs;
         }
         
         Ok(Monitor {
@@ -67,7 +63,7 @@ impl Monitor {
         }
         self.autostart();
 
-        let instruction_queue = VecDeque::new();
+        let mut instruction_queue = VecDeque::new();
         
         loop {
             if let Ok(instruction) = receiver.try_recv() {
@@ -82,10 +78,10 @@ impl Monitor {
                     Instruction::Restart(programs) => self.restart_command(programs, &mut sender),
                     Instruction::Reload(file_path) => self.reload(),
                     // Instruction not from Cli
-                    Instruction::RemoveProcessus(id) => self.remove_processus(id),
-                    Instruction::StartProcessus(id) => self.reload(),
-                    Instruction::ResetProcessus(id) => self.reload(),
-                    Instruction::RetryStartProcessus(id) => self.retry_start_processus(id),
+                    Instruction::RemoveProcessus(id, is_remove) => self.remove_processus(id, is_remove),
+                    Instruction::StartProcessus(id) => self.start_processus(id),
+                    Instruction::ResetProcessus(id) => self.reset_processus(id),
+                    Instruction::RetryStartProcessus(id) => self.start_processus(id),
                     Instruction::SetStatus(id, status) => self.set_status(id, status),
                     Instruction::KillProcessus(id) => self.kill_processus(id),
                     Instruction::Exit => self.stop_all(),
@@ -99,51 +95,73 @@ impl Monitor {
 }
 
 impl Monitor {
-    fn get_processus(&self, id: usize) -> Option<&mut Processus> {
-        self.processus.iter_mut().find(|processus| processus.id == id)
+    fn get_processus(processus :&mut Vec<Processus>, id: Id) -> Option<&mut Processus> {
+        processus.iter_mut().find(|processus| processus.id == id)
     }
 
-    fn kill_processus(&self, id: usize) {
-        let processus = self.get_processus(id);
+    fn kill_processus(&mut self, id: Id) {
+        let processus = Self::get_processus(&mut self.processus, id);
 
         if let Some(processus) = processus{
-            if let Some(child) = processus.child {
+            if let Some(child) = &mut processus.child {
                 child.kill();
             }
-            if processus.status != Status::Remove {
+            if processus.status != Status::Reloading(true || false) {
                 processus.status = Status::Inactive;
             }
             self.logger.log(&format!("Sigkill processus {} {}", processus.name, processus.id));
         }
     }
 
-    fn set_status(&self, id: usize, status: Status) {
-        let processus = self.get_processus(id);
+    fn set_status(&mut self, id: Id, status: Status) {
+        let processus = Self::get_processus(&mut self.processus, id);
 
         if let Some(processus) = processus {
             processus.status = status;
         }
     }
 
-    fn start_processus(&self, id: usize) {
-        if let Some(processus) = self.get_processus(id) {
+    fn start_processus(&mut self, id: Id) {
+        if let Some(processus) = Self::get_processus(&mut self.processus, id) {
             if processus.retries > 0 {
-                if let Some(program) = self.programs.get(&processus.name) {
-                    if let Some(command) = program.command {
-                       match processus.start_child(&mut command, program.config.startretries, program.config.umask) {
-                        _ => {}
-                       }
+                if let Some(program) = self.programs.get_mut(&processus.name) {
+                    if let Some(command) = &mut program.command {
+                        match processus.start_child(command, program.config.startretries, program.config.umask) {
+                            Ok(false) => {self.logger.log(&format!("Starting processus {} {}, no atempt left", processus.name, processus.id));},
+                            Ok(true) => {self.logger.log(&format!("Failed to start processus {} {}, no atempt left", processus.name, processus.id));},
+                            Err(err) => {self.logger.log(&format!("{:?}", err));},
+                        } 
                     } else {
                         eprintln!("Can't find command to start processus {} {}", processus.name, processus.id);
                     }
                 } else {
                     eprintln!("Can't find program to start processus {} {}", processus.name, processus.id);
                 }
-                processus.status = Status::Starting;
-                processus.retries -= 1;
-                processus.start_timer();
             } else {
                 self.logger.log(&format!("Fail to start processus {} {} properly, no attempt left", processus.name, processus.id));
+            }
+        }
+    }
+
+    fn reset_processus(&mut self, id: Id) {
+        if let Some(processus) = Self::get_processus(&mut self.processus, id) {
+            if let Some(program) = self.programs.get(&processus.name) {
+                processus.reset_child(program)
+            }
+        }
+    }
+
+    fn remove_processus(&mut self, id: Id, is_remove: bool) {
+        if let Some(processus) = Self::get_processus(&mut self.processus, id) {
+            self.processus.retain(|proc| proc.name == processus.name);
+            if let Some(program) = self.programs.get(&processus.name) {
+                if self.processus.iter().filter(|e| e.name == processus.name).collect::<Vec<&Processus>>().len() == 0 {
+                    if is_remove {
+                        self.programs.remove(&processus.name);
+                    } else {
+                        self.start_command(vec!(processus.name));
+                    }
+                }
             }
         }
     }
@@ -181,7 +199,7 @@ impl Monitor {
             },
             None => {
                 if processus.is_timeout(program.config.starttime) {
-                    return Some(Instruction::SetStatus(processus.id, "Active".to_string()))
+                    return Some(Instruction::SetStatus(processus.id, Status::Active))
                 }
                 None
             },
@@ -201,9 +219,11 @@ impl Monitor {
         }
     }
 
-    fn monitor_remove_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
+    fn monitor_remove_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>, is_remove: bool) -> Option<Instruction> {
         match exit_code {
-            Some(code) => Some(Instruction::RemoveProcessus(processus.id)),
+            Some(code) => {
+                Some(Instruction::RemoveProcessus(processus.id, is_remove))
+            }
             None => {
                 if processus.is_timeout(program.config.stoptime) {
                     Some(Instruction::KillProcessus(processus.id))
@@ -220,14 +240,14 @@ impl Monitor {
             Status::Inactive => {Self::monitor_inactive_processus(processus); None},
             Status::Starting => Self::monitor_starting_processus(program, processus, exit_code),
             Status::Stoping => Self::monitor_stoping_processus(program, processus, exit_code),
-            Status::Remove => Self::monitor_remove_processus(program, processus, exit_code),
+            Status::Reloading(is_remove) => Self::monitor_remove_processus(program, processus, exit_code, is_remove),
             _ => None,
         }
     }
 
     fn monitor_remove(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Id> {
         match exit_code {
-            Some(code) => {return Some(processus.id)},
+            Some(_) => {return Some(processus.id)},
             None => {
                 if processus.is_timeout(program.config.stoptime) {
                     return Some(processus.id)
@@ -238,22 +258,15 @@ impl Monitor {
     }
 
     fn monitor(&mut self, sender: Sender<Instruction>) -> Vec<Instruction> {
-        let instructions = Vec::new();
-        let processus_to_remove = Vec::new();
+        let mut instructions = Vec::new();
 
-        for processus in self.processus.iter() {
+        for processus in self.processus.iter_mut() {
             if let Some(child) = processus.child.as_mut() {
                 match child.try_wait() {
                     Err(_) => panic!("Try_wait failed on processus {} {}", processus.id, processus.name),
                     e => {
                         if let Some(instruction) = Self::monitor_processus(self.programs.get(&processus.name).unwrap(), processus, e.unwrap()) {
-                            if processus.status == Status::Remove {
-                                if let Some(id) = Self::monitor_remove(self.programs.get(&processus.name).unwrap(), processus, e.unwrap()) {
-                                    processus_to_remove.push(id);
-                                }
-                            } else {
-                                instructions.push(instruction);
-                            }
+                            instructions.push(instruction);
                         }
                     },
                 };
@@ -265,9 +278,6 @@ impl Monitor {
                     },
                 }
             }
-        }
-        if processus_to_remove.len() > 0 {
-            instructions.push(Instruction::Remove(processus_to_remove))
         }
         instructions
     }
@@ -288,15 +298,15 @@ impl Monitor {
             let program = if let Some(program) = self.programs.get_mut(&name) {
                 program
             } else {
-                println!("Program not found: {name}");
+                eprintln!("Program not found: {}", name);
                 continue;
             };
-            for processus in self.processus.iter_mut().filter(|e| e.name == name) {
+            for processus in self.processus.iter().filter(|e| e.name == name) {
                 if processus.status == Status::Inactive {
-                    Monitor::start_processus(processus, program);
+                    self.start_processus(processus.id);
                 }
             }
-            self.logger.log(&format!("Starting {}", &name));
+            self.logger.log(&format!("Starting program {}", &name));
         }
     }
 
@@ -309,7 +319,7 @@ impl Monitor {
                 continue;
             };
             for processus in self.processus.iter_mut().filter(|e| e.name == name) {
-                Monitor::stop_processus(processus, program);
+                Self::stop_processus(processus, program);
             }
             self.logger.log(&format!("Stoping {}", &name));
         }
@@ -322,7 +332,7 @@ impl Monitor {
                     println!("The program {} as stoped running, exit code : {exitstatus}", processus.name);
                 },
                 Ok(None) => {
-                    if let Err(err) = processus.stop_child(program.config.stopsignal) {
+                    if let Err(err) = processus.stop_child(program.config.stopsignal, program.config.startretries) {
                         eprintln!("{}", err.to_string());
                     }
                 }

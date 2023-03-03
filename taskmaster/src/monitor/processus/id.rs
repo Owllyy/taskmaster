@@ -2,7 +2,7 @@ use std::fmt;
 
 static mut id: usize = 0;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 pub struct Id {
     value: usize,
 }

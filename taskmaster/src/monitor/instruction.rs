@@ -9,7 +9,7 @@ pub enum Instruction {
     Stop(Vec<String>),
     Restart(Vec<String>),
     Reload(String),
-    RemoveProcessus(Id),
+    RemoveProcessus(Id, bool),
     StartProcessus(Id),
     ResetProcessus(Id),
     RetryStartProcessus(Id),

@@ -18,7 +18,7 @@ pub enum Status {
     Stoping,
     Active,
     Inactive,
-    Remove,
+    Reloading(bool),
 }
 
 impl fmt::Display for Status {
@@ -57,22 +57,31 @@ impl Processus {
         Duration::from_secs(duration as u64) < self.timer.elapsed()
     }
 
-    pub fn stop_child(&mut self, signal: Signal) -> Result<(), Box<dyn Error>> {
+    pub fn stop_child(&mut self, signal: Signal, start_retries: usize) -> Result<(), Box<dyn Error>> {
         Libc::kill(&mut self.child, signal).map_err(|err| format!("Libc::kill function failed: {err}"))?;
         self.start_timer();
         self.status = Status::Stoping;
+        self.retries = start_retries;
         Ok(())
     }
 
-    pub fn start_child(&mut self, command: &mut Command, start_retries: usize, mask: u32) -> Result<(), Box<dyn Error>> {
-        self.child = Some(Libc::umask(command, mask).map_err(|err| format!("Libc::umask function failed: {err}"))?);
-        self.start_timer();
-        self.status = Status::Starting;
-        Ok(())
+    pub fn start_child(&mut self, command: &mut Command, start_retries: usize, mask: u32) -> Result<bool, Box<dyn Error>> {
+        if self.retries == 0 {
+            self.status = Status::Inactive;
+            self.retries = start_retries;
+            Ok(true)
+        } else {
+            self.child = Some(Libc::umask(command, mask).map_err(|err| format!("Libc::umask function failed: {err}"))?);
+            self.start_timer();
+            self.status = Status::Starting;
+            self.retries -= 1;
+            Ok(false)
+        }
     }
 
-    pub fn reset_child(&mut self) {
+    pub fn reset_child(&mut self, program: &Program) {
         self.child = None;
         self.status = Status::Inactive;
+        self.retries = program.config.startretries;
     }
 }
