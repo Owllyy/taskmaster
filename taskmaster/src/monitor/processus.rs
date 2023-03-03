@@ -62,7 +62,6 @@ impl Processus {
         self.child = Some(Libc::umask(command, mask).map_err(|err| format!("Libc::umask function failed: {err}"))?);
         self.start_timer();
         self.status = Status::Starting;
-        self.retries = start_retries;
         Ok(())
     }
 
