@@ -1,8 +1,8 @@
 use std::{process::{Command, Stdio}, error::Error, fs::File};
-use super::parsing::Task;
+use super::parsing::Config;
 
 pub struct Program {
-    pub config: Task,
+    pub config: Config,
     pub command: Option<Command>,
 }
 

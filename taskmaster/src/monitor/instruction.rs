@@ -1,17 +1,19 @@
 use std::{str::FromStr, error::Error};
 
+use super::processus::id::Id;
+
 pub enum Instruction {
     Status,
     Start(Vec<String>),
     Stop(Vec<String>),
     Restart(Vec<String>),
     Reload(String),
-    Remove(Vec<usize>),
-    StartProcessus(String, usize),
-    ResetProcessus(String, usize),
-    RetryStartProcessus(String, usize),
-    SetStatus(String, usize, String),
-    KillProcessus(String, usize),
+    Remove(Vec<Id>),
+    StartProcessus(String, Id),
+    ResetProcessus(String, Id),
+    RetryStartProcessus(String, Id),
+    SetStatus(String, Id, String),
+    KillProcessus(String, Id),
     Exit,
 }
 

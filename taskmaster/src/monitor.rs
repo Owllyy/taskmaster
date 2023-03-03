@@ -21,6 +21,8 @@ use instruction::Instruction;
 use crate::signal::Signal;
 use crate::sys::Libc;
 
+use self::processus::id::Id;
+
 fn sig_handler(sig: i32) {
     println!("recieved sighup");
 }
@@ -46,7 +48,7 @@ impl Monitor {
                 continue;
             }
             for id in 0..program.config.numprocs {
-                processus.push(Processus::new(i + id, name, program.config.startretries));
+                processus.push(Processus::new(name, program));
             }
             i += program.config.numprocs;
         }
@@ -72,12 +74,12 @@ impl Monitor {
                     Instruction::Stop(programs) => self.stop_command(programs),
                     Instruction::Restart(programs) => self.restart_command(programs, &mut sender),
                     Instruction::Reload(file_path) => self.reload(),
-                    Instruction::Remove(ids) => self.remove_processus(ids),
-                    Instruction::StartProcessus(String, usize) => self.reload(),
-                    Instruction::ResetProcessus(String, usize) => self.reload(),
-                    Instruction::RetryStartProcessus(String, usize) => self.reload(),
-                    Instruction::SetStatus(String, usize, String) => self.reload(),
-                    Instruction::KillProcessus(String, usize) => self.reload(),
+                    Instruction::Remove(ids) => unimplemented!(),
+                    Instruction::StartProcessus(String, Id) => self.reload(),
+                    Instruction::ResetProcessus(String, Id) => self.reload(),
+                    Instruction::RetryStartProcessus(String, Id) => self.reload(),
+                    Instruction::SetStatus(String, Id, String) => self.reload(),
+                    Instruction::KillProcessus(String, Id) => self.reload(),
                     Instruction::Exit => self.stop_all(),
                 }
             }
@@ -88,16 +90,6 @@ impl Monitor {
 }
 
 impl Monitor {
-
-    fn Retry_Start_Child() {
-        if proc.retries > 0 {
-            proc.child = Some(program.command.as_mut().expect("Command is not build").spawn().expect("Spawn failed"));
-            proc.retries -= 1;
-            proc.start_timer();
-        } else {
-            self.logger.log(&format!("Fail to start {} properly, no attempt left", name));
-        }
-    }
 
     fn monitor_active_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
         match exit_code {
@@ -164,7 +156,7 @@ impl Monitor {
         None
     }
 
-    fn monitor_remove(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<usize> {
+    fn monitor_remove(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Id> {
         match exit_code {
             Some(code) => {return Some(processus.id)},
             None => {
@@ -366,13 +358,8 @@ impl Monitor {
                     }
                     self.stop_command(vec!(name.to_owned()));
                     self.processus.retain(|e| &e.name != &name);
-                    let i: usize = if let Some(proc) = self.processus.last() {
-                        proc.id + 1
-                    } else {
-                        0
-                    };
                     for id in 0..program.config.numprocs {
-                        self.processus.push(Processus::new(i + id, &name, program.config.startretries));
+                        self.processus.push(Processus::new(&name, &program));
                     }
                     self.programs.insert(name, program);
                 }
@@ -382,13 +369,8 @@ impl Monitor {
                     eprintln!("Program {}: {}", name, err.to_string());
                     continue;
                 }
-                let i: usize = if let Some(proc) = self.processus.last() {
-                    proc.id + 1
-                } else {
-                    0
-                };
                 for id in 0..program.config.numprocs {
-                    self.processus.push(Processus::new(i + id, &name, program.config.startretries));
+                    self.processus.push(Processus::new(&name, &program));
                 }
                 self.programs.insert(name, program);
             }
