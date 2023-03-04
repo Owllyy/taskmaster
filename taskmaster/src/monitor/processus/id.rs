@@ -16,10 +16,8 @@ impl fmt::Display for Id {
 impl Default for Id {
     fn default() -> Self {
         let id_value;
-        unsafe {
-            id_value = ID.load(Ordering::Relaxed);
-            ID.store(id_value, Ordering::Relaxed);
-        }
+        id_value = ID.load(Ordering::Relaxed);
+        ID.store(id_value, Ordering::Relaxed);
         Self {
             value: id_value,
         }

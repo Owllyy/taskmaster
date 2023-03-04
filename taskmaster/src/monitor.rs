@@ -64,7 +64,7 @@ impl Monitor {
         }
         self.autostart();
 
-        let mut instruction_queue = VecDeque::new();
+        let mut instruction_queue: VecDeque<Instruction> = VecDeque::new();
         
         loop {
             if sys::RELOAD_INSTRUCTION.load(Ordering::Relaxed) {
@@ -90,7 +90,6 @@ impl Monitor {
                     Instruction::SetStatus(id, status) => self.set_status(id, status),
                     Instruction::KillProcessus(id) => self.kill_processus(id),
                     Instruction::Exit => self.stop_all(),
-                    _ => {},
                 }
             }
             self.monitor(sender.clone());
@@ -100,7 +99,7 @@ impl Monitor {
 }
 
 impl Monitor {
-    fn get_processus(processus :&mut Vec<Processus>, id: Id) -> Option<&mut Processus> {
+    fn get_processus(processus: &mut Vec<Processus>, id: Id) -> Option<&mut Processus> {
         processus.iter_mut().find(|processus| processus.id == id)
     }
 
@@ -156,16 +155,16 @@ impl Monitor {
         }
     }
 
+    // Need rework logic problem
     fn remove_processus(&mut self, id: Id, is_remove: bool) {
         if let Some(processus) = Self::get_processus(&mut self.processus, id) {
-            self.processus.retain(|proc| proc.name == processus.name);
-            if let Some(program) = self.programs.get(&processus.name) {
-                if self.processus.iter().filter(|e| e.name == processus.name).collect::<Vec<&Processus>>().len() == 0 {
-                    if is_remove {
-                        self.programs.remove(&processus.name);
-                    } else {
-                        self.start_command(vec!(processus.name));
-                    }
+            let processus_name = processus.name.to_owned();
+            self.processus.retain(|proc| proc.id != id);
+            if self.processus.iter().filter(|e| e.name == processus_name).collect::<Vec<&Processus>>().len() == 0 {
+                if is_remove {
+                    self.programs.remove(&processus_name);
+                } else {
+                    self.start_command(vec!(processus_name));
                 }
             }
         }
@@ -213,7 +212,7 @@ impl Monitor {
 
     fn monitor_stoping_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
         match exit_code {
-            Some(code) => Some(Instruction::ResetProcessus(processus.id)),
+            Some(_) => Some(Instruction::ResetProcessus(processus.id)),
             None => {
                 if processus.is_timeout(program.config.stoptime) {
                     Some(Instruction::KillProcessus(processus.id))
@@ -226,7 +225,7 @@ impl Monitor {
 
     fn monitor_remove_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>, is_remove: bool) -> Option<Instruction> {
         match exit_code {
-            Some(code) => {
+            Some(_) => {
                 Some(Instruction::RemoveProcessus(processus.id, is_remove))
             }
             None => {
@@ -246,7 +245,6 @@ impl Monitor {
             Status::Starting => Self::monitor_starting_processus(program, processus, exit_code),
             Status::Stoping => Self::monitor_stoping_processus(program, processus, exit_code),
             Status::Reloading(is_remove) => Self::monitor_remove_processus(program, processus, exit_code, is_remove),
-            _ => None,
         }
     }
 
@@ -300,9 +298,7 @@ impl Monitor {
 
     fn start_command(&mut self, names: Vec<String>) {
         for name in names {
-            let program = if let Some(program) = self.programs.get_mut(&name) {
-                program
-            } else {
+            if let None = self.programs.get_mut(&name) {
                 eprintln!("Program not found: {}", name);
                 continue;
             };

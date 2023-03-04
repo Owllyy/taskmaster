@@ -8,7 +8,7 @@ pub enum Instruction {
     Start(Vec<String>),
     Stop(Vec<String>),
     Restart(Vec<String>),
-    Reload(String),
+    Reload,
     RemoveProcessus(Id, bool),
     StartProcessus(Id),
     ResetProcessus(Id),
