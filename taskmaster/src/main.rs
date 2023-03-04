@@ -1,8 +1,10 @@
-use std::{process, io};
+use std::process;
+mod file;
 use taskmaster::Taskmaster;
 
 fn main() {
-    let mut taskmaster: Taskmaster = Taskmaster::build("simple.conf").unwrap_or_else(|err| {
+
+    let taskmaster = Taskmaster::new(file::get_config_from_args()).unwrap_or_else(|err| {
         eprintln!("Taskmaster: {err}");
         process::exit(1);
     });
