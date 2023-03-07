@@ -24,7 +24,7 @@ use crate::sys::{Libc, self};
 use self::processus::id::Id;
 
 fn sig_handler(sig: i32) {
-    sys::RELOAD_INSTRUCTION.store(true, Ordering::Relaxed);
+    sys::RELOAD_INSTRUCTION.store(true, Ordering::SeqCst);
 }
 
 pub struct Monitor {
@@ -67,9 +67,9 @@ impl Monitor {
         let mut instruction_queue: VecDeque<Instruction> = VecDeque::new();
         
         loop {
-            if sys::RELOAD_INSTRUCTION.load(Ordering::Relaxed) {
+            if sys::RELOAD_INSTRUCTION.load(Ordering::SeqCst) {
                 instruction_queue.push_front(Instruction::Reload);
-                sys::RELOAD_INSTRUCTION.store(false, Ordering::Relaxed);
+                sys::RELOAD_INSTRUCTION.store(false, Ordering::SeqCst);
             }
             if let Ok(instruction) = receiver.try_recv() {
                 instruction_queue.push_back(instruction);
@@ -92,7 +92,9 @@ impl Monitor {
                     Instruction::Exit => self.stop_all(),
                 }
             }
-            self.monitor(sender.clone());
+            let mut iteration_instructions: VecDeque<Instruction> = VecDeque::new();
+            iteration_instructions.extend(self.monitor());
+            instruction_queue.append(&mut iteration_instructions);
             thread::sleep(Duration::from_millis(300));
         }
     }
@@ -118,9 +120,7 @@ impl Monitor {
     }
 
     fn set_status(&mut self, id: Id, status: Status) {
-        let processus = Self::get_processus(&mut self.processus, id);
-
-        if let Some(processus) = processus {
+        if let Some(processus) = Self::get_processus(&mut self.processus, id) {
             processus.status = status;
         }
     }
@@ -190,6 +190,7 @@ impl Monitor {
         panic!("Child exist but the processus {} {} status is Inactive", processus.id, processus.name);
     }
 
+    // Working ?
     fn monitor_starting_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
         match exit_code {
             Some(code) => {
@@ -239,13 +240,14 @@ impl Monitor {
     }
 
     fn monitor_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
-        match processus.status {
+        let tmp = match processus.status {
             Status::Active => Self::monitor_active_processus(program, processus, exit_code),
             Status::Inactive => {Self::monitor_inactive_processus(processus); None},
             Status::Starting => Self::monitor_starting_processus(program, processus, exit_code),
             Status::Stoping => Self::monitor_stoping_processus(program, processus, exit_code),
             Status::Reloading(is_remove) => Self::monitor_remove_processus(program, processus, exit_code, is_remove),
-        }
+        };
+        tmp
     }
 
     fn monitor_remove(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Id> {
@@ -260,7 +262,7 @@ impl Monitor {
         None
     }
 
-    fn monitor(&mut self, sender: Sender<Instruction>) -> Vec<Instruction> {
+    fn monitor(&mut self) -> Vec<Instruction> {
         let mut instructions = Vec::new();
 
         for processus in self.processus.iter_mut() {
@@ -302,10 +304,15 @@ impl Monitor {
                 eprintln!("Program not found: {}", name);
                 continue;
             };
-            for processus in self.processus.iter().filter(|e| e.name == name) {
-                if processus.status == Status::Inactive {
-                    self.start_processus(processus.id);
+            let filtered_processus_ids: Vec<Id> = self.processus.iter().filter_map(|e| {
+                if e.name == name && e.status == Status::Inactive {
+                    Some(e.id)
+                } else {
+                    None
                 }
+            }).collect();
+            for pid in filtered_processus_ids {
+                self.start_processus(pid);
             }
             self.logger.log(&format!("Starting program {}", &name));
         }

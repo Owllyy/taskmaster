@@ -3,6 +3,7 @@ use std::{str::FromStr, error::Error};
 use super::processus::Status;
 use super::processus::id::Id;
 
+#[derive(Debug)]
 pub enum Instruction {
     Status,
     Start(Vec<String>),
