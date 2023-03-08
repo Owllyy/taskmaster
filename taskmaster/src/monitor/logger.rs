@@ -23,7 +23,7 @@ impl Logger {
         })
     }
 
-    pub fn log(&mut self, msg: &str) -> io::Result<()> {
-        writeln!(self.output, "{}", msg)
+    pub fn log(&mut self, msg: &str) {
+        writeln!(self.output, "{}", msg);
     }
 }
