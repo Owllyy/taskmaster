@@ -1,5 +1,33 @@
-Starting processus infinity   0  , no atempt left
-Starting processus infinity   1  , no atempt left
-Starting processus infinity   2  , no atempt left
+Starting processus infinity   0  , 2 atempt left
+Starting processus infinity   1  , 2 atempt left
+Starting processus infinity   2  , 2 atempt left
 Starting program infinity
-Displaying Status
+Starting processus infinity   0  , 1 atempt left
+Starting processus infinity   1  , 1 atempt left
+Starting processus infinity   2  , 1 atempt left
+Starting processus infinity   1  , 0 atempt left
+Starting processus infinity   2  , 0 atempt left
+Starting processus infinity   0  , 0 atempt left
+Failed to start processus infinity   2  , no atempt left
+Failed to start processus infinity   0  , no atempt left
+Failed to start processus infinity   1  , no atempt left
+Starting processus infinity   0  , 2 atempt left
+Starting processus infinity   2  , 2 atempt left
+Starting processus infinity   0  , 1 atempt left
+Starting processus infinity   0  , 2 atempt left
+Starting processus infinity   2  , 2 atempt left
+Starting processus infinity   0  , 1 atempt left
+Starting processus infinity   2  , 1 atempt left
+Starting processus infinity   0  , 0 atempt left
+Starting processus infinity   2  , 0 atempt left
+Failed to start processus infinity   0  , no atempt left
+Starting processus infinity   0  , 2 atempt left
+Failed to start processus infinity   2  , no atempt left
+Starting processus infinity   0  , 1 atempt left
+Starting processus infinity   2  , 2 atempt left
+Starting processus infinity   0  , 2 atempt left
+Starting processus infinity   0  , 1 atempt left
+Starting processus infinity   2  , 2 atempt left
+Starting processus infinity   0  , 0 atempt left
+Starting processus infinity   2  , 1 atempt left
+Starting processus infinity   2  , 0 atempt left

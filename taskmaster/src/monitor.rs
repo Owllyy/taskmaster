@@ -75,6 +75,7 @@ impl Monitor {
                 instruction_queue.push_back(instruction);
             }
             if let Some(instruction) = instruction_queue.pop_front() {
+                dbg!(&instruction);
                 match instruction {
                     // Instruction from cli
                     Instruction::Status => self.status_command(),
@@ -127,22 +128,18 @@ impl Monitor {
 
     fn start_processus(&mut self, id: Id) {
         if let Some(processus) = Self::get_processus(&mut self.processus, id) {
-            if processus.retries > 0 {
-                if let Some(program) = self.programs.get_mut(&processus.name) {
-                    if let Some(command) = &mut program.command {
-                        match processus.start_child(command, program.config.startretries, program.config.umask) {
-                            Ok(false) => {self.logger.log(&format!("Starting processus {} {}, no atempt left", processus.name, processus.id));},
-                            Ok(true) => {self.logger.log(&format!("Failed to start processus {} {}, no atempt left", processus.name, processus.id));},
-                            Err(err) => {self.logger.log(&format!("{:?}", err));},
-                        } 
-                    } else {
-                        eprintln!("Can't find command to start processus {} {}", processus.name, processus.id);
-                    }
+            if let Some(program) = self.programs.get_mut(&processus.name) {
+                if let Some(command) = &mut program.command {
+                    match processus.start_child(command, program.config.startretries, program.config.umask) {
+                        Ok(false) => {self.logger.log(&format!("Starting processus {} {}, {} atempt left", processus.name, processus.id, processus.retries));},
+                        Ok(true) => {self.logger.log(&format!("Failed to start processus {} {}, no atempt left", processus.name, processus.id));},
+                        Err(err) => {self.logger.log(&format!("{:?}", err));},
+                    } 
                 } else {
-                    eprintln!("Can't find program to start processus {} {}", processus.name, processus.id);
+                    eprintln!("Can't find command to start processus {} {}", processus.name, processus.id);
                 }
             } else {
-                self.logger.log(&format!("Fail to start processus {} {} properly, no attempt left", processus.name, processus.id));
+                eprintln!("Can't find program to start processus {} {}", processus.name, processus.id);
             }
         }
     }
@@ -193,19 +190,20 @@ impl Monitor {
     fn monitor_starting_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
         match exit_code {
             Some(code) => {
-                if (program.config.autorestart == "true")
+                if ((program.config.autorestart == "true")
                 || (program.config.autorestart == "unexpected"
-                && program.config.exitcodes.iter().find(|&&e| e == code.code().expect("Failed to get exit code")) == None) {
-                    return Some(Instruction::RetryStartProcessus(processus.id))
+                && program.config.exitcodes.iter().find(|&&e| e == code.code().expect("Failed to get exit code")) == None)) && processus.retries > 0 {
+                    Some(Instruction::RetryStartProcessus(processus.id))
                 } else {
-                    return Some(Instruction::ResetProcessus(processus.id))
+                    Some(Instruction::ResetProcessus(processus.id))
                 }
             },
             None => {
                 if processus.is_timeout(program.config.starttime) {
-                    return Some(Instruction::SetStatus(processus.id, Status::Active))
+                    Some(Instruction::SetStatus(processus.id, Status::Active))
+                } else {
+                    None
                 }
-                None
             },
         }
     }
@@ -237,7 +235,7 @@ impl Monitor {
             }
         }
     }
-
+    
     fn monitor_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
         let tmp = match processus.status {
             Status::Active => Self::monitor_active_processus(program, processus, exit_code),
@@ -247,18 +245,6 @@ impl Monitor {
             Status::Reloading(is_remove) => Self::monitor_remove_processus(program, processus, exit_code, is_remove),
         };
         tmp
-    }
-
-    fn monitor_remove(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Id> {
-        match exit_code {
-            Some(_) => {return Some(processus.id)},
-            None => {
-                if processus.is_timeout(program.config.stoptime) {
-                    return Some(processus.id)
-                }
-            },
-        }
-        None
     }
 
     fn monitor(&mut self) -> Vec<Instruction> {
@@ -274,13 +260,6 @@ impl Monitor {
                         }
                     },
                 };
-            } else {
-                match processus.status {
-                    Status::Inactive => {},
-                    _ => {
-                        panic!("Status is set but processus {} {} has no child", processus.name, processus.id);
-                    },
-                }
             }
         }
         instructions
