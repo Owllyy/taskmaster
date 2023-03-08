@@ -24,7 +24,13 @@ pub enum Status {
 impl fmt::Display for Status {
     //todo understand formating with fmt::Display
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "      {:?}      ", self)
+        match self {
+            Status::Starting => write!(f, "{:^20}", "Starting".to_string()),
+            Status::Stoping => write!(f, "{:^20}", "Stoping"),
+            Status::Active => write!(f, "{:^20}", "Active"),
+            Status::Inactive => write!(f, "{:^20}", "Inactive"),
+            Status::Reloading(true | false) => write!(f, "{:^20}", "Reloading"),
+        }
     }
 }
 
