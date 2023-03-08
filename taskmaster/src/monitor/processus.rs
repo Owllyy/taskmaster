@@ -66,7 +66,9 @@ impl Processus {
     pub fn stop_child(&mut self, signal: Signal, start_retries: usize) -> Result<(), Box<dyn Error>> {
         Libc::kill(&mut self.child, signal).map_err(|err| format!("Libc::kill function failed: {err}"))?;
         self.start_timer();
-        self.status = Status::Stoping;
+        if self.status != Status::Reloading(true | false) {
+            self.status = Status::Stoping;
+        }
         self.retries = start_retries;
         Ok(())
     }

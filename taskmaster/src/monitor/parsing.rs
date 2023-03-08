@@ -45,7 +45,7 @@ impl Parsing {
         let mut parsed: Parsing = serde_yaml::from_str(&file_content)?;
 
         for (name, config) in parsed.tasks.drain() {
-            programs.insert(name, Program { config, command: None });
+            programs.insert(name, Program::new(config, None, true));
         }
         Ok(programs)
     }
