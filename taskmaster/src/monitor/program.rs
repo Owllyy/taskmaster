@@ -23,8 +23,16 @@ impl Program {
     }
 
     fn fd_setup(&self) -> Result<(Stdio, Stdio), Box<dyn Error>> {
-        let stdout = Stdio::from(File::create(&self.config.stdout)?);
-        let stderr = Stdio::from(File::create(&self.config.stderr)?);
+        let stdout = if self.config.stdout.is_empty() {
+            Stdio::null()
+        } else {
+            Stdio::from(File::create(&self.config.stdout)?)
+        };
+        let stderr = if self.config.stderr.is_empty() {
+            Stdio::null()
+        } else {
+            Stdio::from(File::create(&self.config.stderr)?)
+        };
 
         Ok((stdout, stderr))
     }

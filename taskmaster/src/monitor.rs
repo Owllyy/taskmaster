@@ -81,7 +81,7 @@ impl Monitor {
                     Instruction::Start(programs) => self.start_command(programs),
                     Instruction::Stop(programs) => self.stop_command(programs),
                     Instruction::Restart(programs) => self.restart_command(programs, &mut sender),
-                    Instruction::Reload => self.reload(),
+                    Instruction::Reload => instruction_queue.append(&mut self.reload()),
                     // Instruction not from Cli
                     Instruction::RemoveProcessus(id, is_remove) => self.remove_processus(id, is_remove),
                     Instruction::StartProcessus(id) => self.start_processus(id),
@@ -190,7 +190,6 @@ impl Monitor {
         panic!("Child exist but the processus {} {} status is Inactive", processus.id, processus.name);
     }
 
-    // Working ?
     fn monitor_starting_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
         match exit_code {
             Some(code) => {
@@ -393,21 +392,21 @@ impl Monitor {
         self.stop_command(to_stop);
     }
     
-    fn reload(&mut self) {
+    fn reload(&mut self) -> VecDeque<Instruction> {
+        let mut instructions: VecDeque<Instruction> = VecDeque::new();
         let new_programs = match Parsing::parse(&self.config_file_path) {
             Ok(programs) => programs,
             Err(err) => {
                 self.logger.log(&format!("Failed to reload config file: {}", err));
-                return;
+                return instructions;
             }
         };
         // 1. If some programs disapeared we stop the concerned procs and do not track them anymore
-        let mut to_stop: Vec<String> = Vec::new();
         for (name, _) in self.programs.iter_mut().filter(|e| !new_programs.contains_key(e.0)) {
-            to_stop.push(name.to_owned());
-            self.processus.retain(|e| &e.name != name);
+            for proc in self.processus.iter().filter(|e| &e.name == name) {
+                instructions.push_back(Instruction::RemoveProcessus(proc.id, true));
+            }
         }
-        self.stop_command(to_stop);
         for (name, mut program) in new_programs {
             if self.programs.contains_key(&name) {
                 // 2. Check all progs and if the conf hasn't changed do nothing
@@ -419,12 +418,10 @@ impl Monitor {
                         eprintln!("Program {}: {}", name, err.to_string());
                         continue;
                     }
-                    self.stop_command(vec!(name.to_owned()));
-                    self.processus.retain(|e| &e.name != &name);
-                    for id in 0..program.config.numprocs {
-                        self.processus.push(Processus::new(&name, &program));
+                    for proc in self.processus.iter().filter(|&e| e.name == name) {
+                        instructions.push_back(Instruction::RemoveProcessus(proc.id, false));
                     }
-                    self.programs.insert(name, program);
+                    // self.programs.insert(name, program);
                 }
             } else {
                 // 4. If some new programs appeared we start tracking them and start if necessery
@@ -432,7 +429,7 @@ impl Monitor {
                     eprintln!("Program {}: {}", name, err.to_string());
                     continue;
                 }
-                for id in 0..program.config.numprocs {
+                for _ in 0..program.config.numprocs {
                     self.processus.push(Processus::new(&name, &program));
                 }
                 self.programs.insert(name, program);
@@ -440,5 +437,6 @@ impl Monitor {
         }
         // 4. If some programs disapeared we stop the concerned procs and do not track them anymore
         self.logger.log("Reloading config file");
+        instructions
     }
 }
