@@ -318,7 +318,7 @@ impl Monitor {
             let program = if let Some(program) = self.programs.get_mut(&name) {
                 program
             } else {
-                println!("Unknown Program");
+                eprintln!("Program not found: {}", name);
                 continue;
             };
             for processus in self.processus.iter_mut().filter(|e| e.name == name) {
@@ -350,7 +350,7 @@ impl Monitor {
         for name in &names {
             match self.programs.get(name) {
                 None => {
-                    eprintln!("{} program not found", name);
+                    eprintln!("Program not found: {}", name);
                     return ;
             },
                 _ => {},
