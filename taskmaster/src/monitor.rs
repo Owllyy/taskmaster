@@ -161,12 +161,24 @@ impl Monitor {
             let processus_name = processus.name.to_owned();
             self.processus.retain(|proc| proc.id != id);
             if self.processus.iter().filter(|e| e.name == processus_name).collect::<Vec<&Processus>>().len() == 0 {
-                if is_remove {
-                    self.logger.log(&format!("Remove processus {} {}", processus_name, id));
-                    self.programs.remove(&processus_name);
+                // remove old one anyway
+                self.programs.remove(&processus_name);
+                // if there is with inactive flag do stuff
+                let name = if let Some((name, _)) = self.programs.iter().find(|e| e.0 == &[INACTIVE_FLAG, &processus_name].concat()) {
+                    name.to_owned()
                 } else {
-                    self.logger.log(&format!("Reload processus {} {}", processus_name, id));
-                    self.start_command(vec!(processus_name));
+                    return;
+                };
+                if let Some(mut program) = self.programs.remove(&name) {
+                    program.activate();
+                    self.programs.insert(processus_name.to_owned(), program);
+                    let program = self.programs.get(&processus_name).unwrap();
+                    for _ in 0..program.config.numprocs {
+                        self.processus.push(Processus::new(&processus_name, program));
+                    }
+                    if program.config.autostart {
+                        self.start_command(vec![processus_name]);
+                    }
                 }
             }
         }
