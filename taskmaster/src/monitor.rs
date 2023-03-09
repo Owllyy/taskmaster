@@ -408,8 +408,8 @@ impl Monitor {
         };
         // 1. If some programs disapeared we stop the concerned procs and do not track them anymore
         for (name, _) in self.programs.iter_mut().filter(|e| !new_programs.contains_key(e.0)) {
-            for proc in self.processus.iter().filter(|e| &e.name == name) {
-                instructions.push_back(Instruction::RemoveProcessus(proc.id, true));
+            for proc in self.processus.iter_mut().filter(|e| &e.name == name) {
+                proc.status = Status::Reloading(true);
             }
         }
         for (name, mut program) in new_programs {
@@ -423,10 +423,11 @@ impl Monitor {
                         eprintln!("Program {}: {}", name, err.to_string());
                         continue;
                     }
-                    for proc in self.processus.iter().filter(|&e| e.name == name) {
-                        instructions.push_back(Instruction::RemoveProcessus(proc.id, false));
+                    for proc in self.processus.iter_mut().filter(|e| e.name == name) {
+                        proc.status = Status::Reloading(false);
                     }
-                    // self.programs.insert(name, program);
+                    program.deactivate();
+                    self.programs.insert(Program::prefix_name(INACTIVE_FLAG, name), program);
                 }
             } else {
                 // 4. If some new programs appeared we start tracking them and start if necessery
@@ -437,7 +438,11 @@ impl Monitor {
                 for _ in 0..program.config.numprocs {
                     self.processus.push(Processus::new(&name, &program));
                 }
-                self.programs.insert(name, program);
+                self.programs.insert(name.to_owned(), program);
+                let program = self.programs.get(&name).unwrap();
+                if program.config.autostart {
+                    self.start_command(vec![name]);
+                }
             }
         }
         // 4. If some programs disapeared we stop the concerned procs and do not track them anymore
