@@ -23,6 +23,8 @@ use crate::sys::{Libc, self};
 
 use self::processus::id::Id;
 
+const INACTIVE_FLAG: &str = "Inactive";
+
 fn sig_handler(sig: i32) {
     sys::RELOAD_INSTRUCTION.store(true, Ordering::SeqCst);
 }
