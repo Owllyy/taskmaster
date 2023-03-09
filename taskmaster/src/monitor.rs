@@ -133,7 +133,7 @@ impl Monitor {
                     match processus.start_child(command, program.config.startretries, program.config.umask) {
                         Ok(false) => {self.logger.log(&format!("Starting processus {} {}, {} atempt left", processus.name, processus.id, processus.retries));},
                         Ok(true) => {self.logger.log(&format!("Failed to start processus {} {}, no atempt left", processus.name, processus.id));},
-                        Err(err) => {self.logger.log(&format!("{:?}", err));},
+                        Err(err) => {eprintln!("{:?}", err);self.logger.log(&format!("{:?}", err));},
                     } 
                 } else {
                     eprintln!("Can't find command to start processus {} {}", processus.name, processus.id);
@@ -148,7 +148,7 @@ impl Monitor {
         if let Some(processus) = Self::get_processus(&mut self.processus, id) {
             if let Some(program) = self.programs.get(&processus.name) {
                 self.logger.log(&format!("Reset processus {} {}", processus.name, processus.id));
-                processus.reset_child(program)
+                processus.reset_child(program.config.startretries)
             }
         }
     }
@@ -193,7 +193,6 @@ impl Monitor {
     fn monitor_starting_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
         match exit_code {
             Some(code) => {
-                dbg!("Monitor starting", exit_code);
                 if ((program.config.autorestart == "true")
                 || (program.config.autorestart == "unexpected"
                 && program.config.exitcodes.iter().find(|&&e| e == code.code().expect("Failed to get exit code")) == None)) && processus.retries > 0 {
@@ -251,32 +250,19 @@ impl Monitor {
         tmp
     }
 
-    fn monitor_remove(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Id> {
-        match exit_code {
-            Some(_) => {return Some(processus.id)},
-            None => {
-                if processus.is_timeout(program.config.stoptime) {
-                    return Some(processus.id)
-                }
-            },
-        }
-        None
-    }
-
     fn monitor(&mut self) -> Vec<Instruction> {
         let mut instructions = Vec::new();
 
         for processus in self.processus.iter_mut() {
             if let Some(child) = processus.child.as_mut() {
-                // match child.try_wait() {
-                //     Err(_) => panic!("Try_wait failed on processus {} {}", processus.id, processus.name),
-                //     e => {
-                //         dbg!(&e, &processus);
-                //         // if let Some(instruction) = Self::monitor_processus(self.programs.get(&processus.name).unwrap(), processus, e.unwrap()) {
-                //         //     instructions.push(instruction);
-                //         // }
-                //     },
-                // };
+                match child.try_wait() {
+                    Err(_) => panic!("Try_wait failed on processus {} {}", processus.id, processus.name),
+                    e => {
+                        if let Some(instruction) = Self::monitor_processus(self.programs.get(&processus.name).unwrap(), processus, e.unwrap()) {
+                            instructions.push(instruction);
+                        }
+                    },
+                };
             }
         }
         instructions

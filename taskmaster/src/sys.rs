@@ -23,7 +23,7 @@ impl Libc {
         unsafe {
             old_mask = umask(mask);
         }
-        child = command.spawn().map_err(|_| "failed to spawn child process")?;
+        child = command.spawn()?;
         unsafe {
             umask(old_mask);
         }

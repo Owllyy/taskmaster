@@ -83,15 +83,17 @@ impl Processus {
         } else {
             self.status = Status::Starting;
             self.retries -= 1;
-            self.child = Some(Libc::umask(command, mask).map_err(|err| format!("Libc::umask function failed: {err}"))?);
+            self.child = Some(Libc::umask(command, mask).map_err(|err| {
+                self.reset_child(start_retries);
+                format!("Child spawn failed: {err}")})?);
             self.start_timer();
             Ok(false)
         }
     }
 
-    pub fn reset_child(&mut self, program: &Program) {
+    pub fn reset_child(&mut self, start_retries: usize) {
         self.child = None;
         self.status = Status::Inactive;
-        self.retries = program.config.startretries;
+        self.retries = start_retries;
     }
 }
