@@ -23,7 +23,7 @@ impl Taskmaster {
 
     pub fn execute(mut self) -> Result<(), Box<dyn Error>> {
         let (sender, receiver) = mpsc::channel::<Instruction>();
-        let mut sender_clone = sender.clone();
+        let sender_clone = sender.clone();
         let mut monitor = Monitor::new(&self.config_file_path)?;
         thread::spawn(move || {
             monitor.execute(receiver, sender_clone);
@@ -44,6 +44,12 @@ impl Taskmaster {
                     continue;
                 }
             };
+            if let Instruction::Exit = instruction {
+                if let Err(_) = sender.send(instruction) {
+                    eprintln!("Failed to execute instruction");
+                }
+                loop {}
+            }
             if let Err(_) = sender.send(instruction) {
                 eprintln!("Failed to execute instruction");
             }

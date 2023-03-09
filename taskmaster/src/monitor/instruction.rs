@@ -31,6 +31,7 @@ impl FromStr for Instruction {
             "start" | "Start" => Ok(Instruction::Start(parts.map(|s| s.to_string()).collect())),
             "stop" | "Stop" => Ok(Instruction::Stop(parts.map(|s| s.to_string()).collect())),
             "restart" | "Restart" => Ok(Instruction::Restart(parts.map(|s| s.to_string()).collect())),
+            "reload" | "Reload" => Ok(Instruction::Reload),
             _ => Err("Unknown command".into()),
         }
     }
