@@ -9,7 +9,7 @@ pub struct Id {
 
 impl fmt::Display for Id {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.value)
+        write!(f, "{:^5}", self.value)
     }
 }
 
