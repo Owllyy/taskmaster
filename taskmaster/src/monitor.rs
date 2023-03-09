@@ -365,7 +365,7 @@ impl Monitor {
             let sender = sender.clone();
             thread::spawn(move || {
                 thread::sleep(duration);
-                sender.send(Instruction::Start(vec!(name)));
+                sender.send(Instruction::Start(vec!(name))).ok();
             });
         }
     }
