@@ -85,7 +85,7 @@ impl Processus {
             self.retries -= 1;
             self.child = Some(Libc::umask(command, mask).map_err(|err| {
                 self.reset_child(start_retries);
-                format!("Child spawn failed: {err}")})?);
+                format!("Child {} spawn failed: {err}", self.name)})?);
             self.start_timer();
             Ok(false)
         }
