@@ -83,7 +83,7 @@ impl Monitor {
                     Instruction::Start(programs) => self.start_command(programs),
                     Instruction::Stop(programs) => self.stop_command(programs),
                     Instruction::Restart(programs) => self.restart_command(programs, &mut sender),
-                    Instruction::Reload => instruction_queue.append(&mut self.reload()),
+                    Instruction::Reload => self.reload(),
                     // Instruction not from Cli
                     Instruction::RemoveProcessus(id, is_remove) => self.remove_processus(id, is_remove),
                     Instruction::StartProcessus(id) => self.start_processus(id),
@@ -397,13 +397,13 @@ impl Monitor {
         // }
     }
     
-    fn reload(&mut self) -> VecDeque<Instruction> {
-        let mut instructions: VecDeque<Instruction> = VecDeque::new();
+    fn reload(&mut self) {
+        self.logger.log("Reloading config file");
         let new_programs = match Parsing::parse(&self.config_file_path) {
             Ok(programs) => programs,
             Err(err) => {
                 self.logger.log(&format!("Failed to reload config file: {}", err));
-                return instructions;
+                return;
             }
         };
         // 1. If some programs disapeared we stop the concerned procs and do not track them anymore
@@ -423,6 +423,7 @@ impl Monitor {
                         eprintln!("Program {}: {}", name, err.to_string());
                         continue;
                     }
+                    self.stop_command(vec!(name.to_owned()));
                     for proc in self.processus.iter_mut().filter(|e| e.name == name) {
                         proc.status = Status::Reloading(false);
                     }
@@ -445,8 +446,5 @@ impl Monitor {
                 }
             }
         }
-        // 4. If some programs disapeared we stop the concerned procs and do not track them anymore
-        self.logger.log("Reloading config file");
-        instructions
     }
 }
