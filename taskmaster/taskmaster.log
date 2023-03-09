@@ -1,5 +1,15 @@
 Autostart infinity
 Starting program infinity
 Starting processus infinity   0  , 2 atempt left
-Displaying Status
 Seting status of processus infinity   0   to Active
+Stoping infinity
+Reloading config file
+Starting program infinity
+Starting processus infinity   1  , 2 atempt left
+Starting processus infinity   2  , 2 atempt left
+Starting processus infinity   3  , 2 atempt left
+Displaying Status
+Seting status of processus infinity   1   to Active
+Seting status of processus infinity   2   to Active
+Seting status of processus infinity   3   to Active
+Displaying Status
