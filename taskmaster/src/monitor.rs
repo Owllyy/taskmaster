@@ -382,19 +382,20 @@ impl Monitor {
     }
 
     fn stop_all(&mut self) {
-        // let mut to_stop = Vec::new();
-        // for (name, _) in self.programs.iter() {
-        //     to_stop.push(name.to_owned());
-        // }
-        // self.stop_command(to_stop);
-        // while let Some(proc) = self.processus.iter().find(|e| e.child.is_some()) {
-        //     for instruction in self.monitor() {
-        //         match instruction {
-        //             Instruction::ResetProcessus(id) => self.reset_processus(id),
-        //             Instruction::KillProcessus(id) => self.kill_processus(id),
-        //         }
-        //     }
-        // }
+        let mut to_stop = Vec::new();
+        for (name, _) in self.programs.iter() {
+            to_stop.push(name.to_owned());
+        }
+        self.stop_command(to_stop);
+        while let Some(proc) = self.processus.iter().find(|e| e.child.is_some()) {
+            for instruction in self.monitor() {
+                match instruction {
+                    Instruction::ResetProcessus(id) => self.reset_processus(id),
+                    Instruction::KillProcessus(id) => self.kill_processus(id),
+                    _ => {}
+                }
+            }
+        }
     }
     
     fn reload(&mut self) {
@@ -407,7 +408,15 @@ impl Monitor {
             }
         };
         // 1. If some programs disapeared we stop the concerned procs and do not track them anymore
-        for (name, _) in self.programs.iter_mut().filter(|e| !new_programs.contains_key(e.0)) {
+        let to_remove: Vec<String> = self.programs.iter_mut().filter_map(|e| {
+            if !new_programs.contains_key(e.0) {
+                Some(e.0.to_owned())
+            } else {
+                None
+            }
+        }).collect();
+        self.stop_command(to_remove.to_owned());
+        for name in &to_remove {
             for proc in self.processus.iter_mut().filter(|e| &e.name == name) {
                 proc.status = Status::Reloading(true);
             }
