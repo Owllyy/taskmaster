@@ -76,8 +76,7 @@ impl Monitor {
             if let Ok(instruction) = receiver.try_recv() {
                 instruction_queue.push_back(instruction);
             }
-            if let Some(instruction) = instruction_queue.pop_front() {
-                dbg!(&instruction);
+            while let Some(instruction) = instruction_queue.pop_front() {
                 match instruction {
                     // Instruction from cli
                     Instruction::Status => self.status_command(),
@@ -125,6 +124,7 @@ impl Monitor {
     fn set_status(&mut self, id: Id, status: Status) {
         if let Some(processus) = Self::get_processus(&mut self.processus, id) {
             processus.status = status;
+            self.logger.log(&format!("Seting status of processus {} {} to Active", processus.name, processus.id));
         }
     }
 
@@ -135,7 +135,7 @@ impl Monitor {
                     match processus.start_child(command, program.config.startretries, program.config.umask) {
                         Ok(false) => {self.logger.log(&format!("Starting processus {} {}, {} atempt left", processus.name, processus.id, processus.retries));},
                         Ok(true) => {self.logger.log(&format!("Failed to start processus {} {}, no atempt left", processus.name, processus.id));},
-                        Err(err) => {self.logger.log(&format!("{:?}", err));},
+                        Err(err) => {eprintln!("{:?}", err);self.logger.log(&format!("{:?}", err));},
                     } 
                 } else {
                     eprintln!("Can't find command to start processus {} {}", processus.name, processus.id);
@@ -149,11 +149,13 @@ impl Monitor {
     fn reset_processus(&mut self, id: Id) {
         if let Some(processus) = Self::get_processus(&mut self.processus, id) {
             if let Some(program) = self.programs.get(&processus.name) {
-                processus.reset_child(program)
+                self.logger.log(&format!("Reset processus {} {}", processus.name, processus.id));
+                processus.reset_child(program.config.startretries)
             }
         }
     }
 
+    // Need rework logic problem
     fn remove_processus(&mut self, id: Id, is_remove: bool) {
         if let Some(processus) = Self::get_processus(&mut self.processus, id) {
             let processus_name = processus.name.to_owned();
@@ -250,7 +252,7 @@ impl Monitor {
             }
         }
     }
-    
+
     fn monitor_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
         let tmp = match processus.status {
             Status::Active => Self::monitor_active_processus(program, processus, exit_code),
@@ -293,6 +295,7 @@ impl Monitor {
 
     fn start_command(&mut self, names: Vec<String>) {
         for name in names {
+            self.logger.log(&format!("Starting program {}", &name));
             if let None = self.programs.get_mut(&name) {
                 eprintln!("Program not found: {}", name);
                 continue;
@@ -307,7 +310,6 @@ impl Monitor {
             for pid in filtered_processus_ids {
                 self.start_processus(pid);
             }
-            self.logger.log(&format!("Starting program {}", &name));
         }
     }
 
@@ -355,10 +357,10 @@ impl Monitor {
             }
         }
 
-        self.logger.log("Restarting");
         self.stop_command(names.to_owned());
         
         for name in names.to_owned() {
+            self.logger.log(&format!("Restarting {}", name));
             let duration = Duration::new(self.programs.get(&name).expect("program not found").config.stoptime as u64, 0);
             let sender = sender.clone();
             thread::spawn(move || {
@@ -372,6 +374,7 @@ impl Monitor {
         let mut to_start: Vec<String> = Vec::new();
         for (name, program) in self.programs.iter() {
             if program.config.autostart {
+                self.logger.log(&format!("Autostart {}", name));
                 to_start.push(name.to_owned());
             }
         }
@@ -379,11 +382,19 @@ impl Monitor {
     }
 
     fn stop_all(&mut self) {
-        let mut to_stop = Vec::new();
-        for (name, _) in self.programs.iter() {
-            to_stop.push(name.to_owned());
-        }
-        self.stop_command(to_stop);
+        // let mut to_stop = Vec::new();
+        // for (name, _) in self.programs.iter() {
+        //     to_stop.push(name.to_owned());
+        // }
+        // self.stop_command(to_stop);
+        // while let Some(proc) = self.processus.iter().find(|e| e.child.is_some()) {
+        //     for instruction in self.monitor() {
+        //         match instruction {
+        //             Instruction::ResetProcessus(id) => self.reset_processus(id),
+        //             Instruction::KillProcessus(id) => self.kill_processus(id),
+        //         }
+        //     }
+        // }
     }
     
     fn reload(&mut self) -> VecDeque<Instruction> {
