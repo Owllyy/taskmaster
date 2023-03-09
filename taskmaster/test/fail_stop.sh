@@ -1,6 +1,6 @@
 #!/bin/bash
 
-trap {sleep 5} TERM
+trap 'sleep 5' TERM
 
 while :
 do

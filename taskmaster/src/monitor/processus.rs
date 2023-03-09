@@ -34,6 +34,7 @@ impl fmt::Display for Status {
     }
 }
 
+#[derive(Debug)]
 pub struct Processus {
     pub id: Id,
     pub name: String,
@@ -80,10 +81,10 @@ impl Processus {
             self.child = None;
             Ok(true)
         } else {
-            self.child = Some(Libc::umask(command, mask).map_err(|err| format!("Libc::umask function failed: {err}"))?);
-            self.start_timer();
             self.status = Status::Starting;
             self.retries -= 1;
+            self.child = Some(Libc::umask(command, mask).map_err(|err| format!("Libc::umask function failed: {err}"))?);
+            self.start_timer();
             Ok(false)
         }
     }

@@ -23,8 +23,6 @@ use crate::sys::{Libc, self};
 
 use self::processus::id::Id;
 
-const INACTIVE_FLAG: &str = "Inactive";
-
 fn sig_handler(sig: i32) {
     sys::RELOAD_INSTRUCTION.store(true, Ordering::SeqCst);
 }
@@ -76,8 +74,7 @@ impl Monitor {
             if let Ok(instruction) = receiver.try_recv() {
                 instruction_queue.push_back(instruction);
             }
-            if let Some(instruction) = instruction_queue.pop_front() {
-                dbg!(&instruction);
+            while let Some(instruction) = instruction_queue.pop_front() {
                 match instruction {
                     // Instruction from cli
                     Instruction::Status => self.status_command(),
@@ -125,6 +122,7 @@ impl Monitor {
     fn set_status(&mut self, id: Id, status: Status) {
         if let Some(processus) = Self::get_processus(&mut self.processus, id) {
             processus.status = status;
+            self.logger.log(&format!("Seting status of processus {} {} to Active", processus.name, processus.id));
         }
     }
 
@@ -149,34 +147,24 @@ impl Monitor {
     fn reset_processus(&mut self, id: Id) {
         if let Some(processus) = Self::get_processus(&mut self.processus, id) {
             if let Some(program) = self.programs.get(&processus.name) {
+                self.logger.log(&format!("Reset processus {} {}", processus.name, processus.id));
                 processus.reset_child(program)
             }
         }
     }
 
+    // Need rework logic problem
     fn remove_processus(&mut self, id: Id, is_remove: bool) {
         if let Some(processus) = Self::get_processus(&mut self.processus, id) {
             let processus_name = processus.name.to_owned();
             self.processus.retain(|proc| proc.id != id);
             if self.processus.iter().filter(|e| e.name == processus_name).collect::<Vec<&Processus>>().len() == 0 {
-                // remove old one anyway
-                self.programs.remove(&processus_name);
-                // if there is with inactive flag do stuff
-                let name = if let Some((name, _)) = self.programs.iter().find(|e| e.0 == &[INACTIVE_FLAG, &processus_name].concat()) {
-                    name.to_owned()
+                if is_remove {
+                    self.logger.log(&format!("Remove processus {} {}", processus_name, id));
+                    self.programs.remove(&processus_name);
                 } else {
-                    return;
-                };
-                if let Some(mut program) = self.programs.remove(&name) {
-                    program.activate();
-                    self.programs.insert(processus_name.to_owned(), program);
-                    let program = self.programs.get(&processus_name).unwrap();
-                    for _ in 0..program.config.numprocs {
-                        self.processus.push(Processus::new(&processus_name, program));
-                    }
-                    if program.config.autostart {
-                        self.start_command(vec![processus_name]);
-                    }
+                    self.logger.log(&format!("Reload processus {} {}", processus_name, id));
+                    self.start_command(vec!(processus_name));
                 }
             }
         }
@@ -205,6 +193,7 @@ impl Monitor {
     fn monitor_starting_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
         match exit_code {
             Some(code) => {
+                dbg!("Monitor starting", exit_code);
                 if ((program.config.autorestart == "true")
                 || (program.config.autorestart == "unexpected"
                 && program.config.exitcodes.iter().find(|&&e| e == code.code().expect("Failed to get exit code")) == None)) && processus.retries > 0 {
@@ -250,7 +239,7 @@ impl Monitor {
             }
         }
     }
-    
+
     fn monitor_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
         let tmp = match processus.status {
             Status::Active => Self::monitor_active_processus(program, processus, exit_code),
@@ -262,19 +251,32 @@ impl Monitor {
         tmp
     }
 
+    fn monitor_remove(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Id> {
+        match exit_code {
+            Some(_) => {return Some(processus.id)},
+            None => {
+                if processus.is_timeout(program.config.stoptime) {
+                    return Some(processus.id)
+                }
+            },
+        }
+        None
+    }
+
     fn monitor(&mut self) -> Vec<Instruction> {
         let mut instructions = Vec::new();
 
         for processus in self.processus.iter_mut() {
             if let Some(child) = processus.child.as_mut() {
-                match child.try_wait() {
-                    Err(_) => panic!("Try_wait failed on processus {} {}", processus.id, processus.name),
-                    e => {
-                        if let Some(instruction) = Self::monitor_processus(self.programs.get(&processus.name).unwrap(), processus, e.unwrap()) {
-                            instructions.push(instruction);
-                        }
-                    },
-                };
+                // match child.try_wait() {
+                //     Err(_) => panic!("Try_wait failed on processus {} {}", processus.id, processus.name),
+                //     e => {
+                //         dbg!(&e, &processus);
+                //         // if let Some(instruction) = Self::monitor_processus(self.programs.get(&processus.name).unwrap(), processus, e.unwrap()) {
+                //         //     instructions.push(instruction);
+                //         // }
+                //     },
+                // };
             }
         }
         instructions
@@ -293,6 +295,7 @@ impl Monitor {
 
     fn start_command(&mut self, names: Vec<String>) {
         for name in names {
+            self.logger.log(&format!("Starting program {}", &name));
             if let None = self.programs.get_mut(&name) {
                 eprintln!("Program not found: {}", name);
                 continue;
@@ -307,7 +310,6 @@ impl Monitor {
             for pid in filtered_processus_ids {
                 self.start_processus(pid);
             }
-            self.logger.log(&format!("Starting program {}", &name));
         }
     }
 
@@ -355,10 +357,10 @@ impl Monitor {
             }
         }
 
-        self.logger.log("Restarting");
         self.stop_command(names.to_owned());
         
         for name in names.to_owned() {
+            self.logger.log(&format!("Restarting {}", name));
             let duration = Duration::new(self.programs.get(&name).expect("program not found").config.stoptime as u64, 0);
             let sender = sender.clone();
             thread::spawn(move || {
@@ -372,6 +374,7 @@ impl Monitor {
         let mut to_start: Vec<String> = Vec::new();
         for (name, program) in self.programs.iter() {
             if program.config.autostart {
+                self.logger.log(&format!("Autostart {}", name));
                 to_start.push(name.to_owned());
             }
         }
@@ -379,11 +382,19 @@ impl Monitor {
     }
 
     fn stop_all(&mut self) {
-        let mut to_stop = Vec::new();
-        for (name, _) in self.programs.iter() {
-            to_stop.push(name.to_owned());
-        }
-        self.stop_command(to_stop);
+        // let mut to_stop = Vec::new();
+        // for (name, _) in self.programs.iter() {
+        //     to_stop.push(name.to_owned());
+        // }
+        // self.stop_command(to_stop);
+        // while let Some(proc) = self.processus.iter().find(|e| e.child.is_some()) {
+        //     for instruction in self.monitor() {
+        //         match instruction {
+        //             Instruction::ResetProcessus(id) => self.reset_processus(id),
+        //             Instruction::KillProcessus(id) => self.kill_processus(id),
+        //         }
+        //     }
+        // }
     }
     
     fn reload(&mut self) -> VecDeque<Instruction> {
@@ -397,8 +408,8 @@ impl Monitor {
         };
         // 1. If some programs disapeared we stop the concerned procs and do not track them anymore
         for (name, _) in self.programs.iter_mut().filter(|e| !new_programs.contains_key(e.0)) {
-            for proc in self.processus.iter_mut().filter(|e| &e.name == name) {
-                proc.status = Status::Reloading(true);
+            for proc in self.processus.iter().filter(|e| &e.name == name) {
+                instructions.push_back(Instruction::RemoveProcessus(proc.id, true));
             }
         }
         for (name, mut program) in new_programs {
@@ -412,11 +423,10 @@ impl Monitor {
                         eprintln!("Program {}: {}", name, err.to_string());
                         continue;
                     }
-                    for proc in self.processus.iter_mut().filter(|e| e.name == name) {
-                        proc.status = Status::Reloading(false);
+                    for proc in self.processus.iter().filter(|&e| e.name == name) {
+                        instructions.push_back(Instruction::RemoveProcessus(proc.id, false));
                     }
-                    program.deactivate();
-                    self.programs.insert(Program::prefix_name(INACTIVE_FLAG, name), program);
+                    // self.programs.insert(name, program);
                 }
             } else {
                 // 4. If some new programs appeared we start tracking them and start if necessery
@@ -427,11 +437,7 @@ impl Monitor {
                 for _ in 0..program.config.numprocs {
                     self.processus.push(Processus::new(&name, &program));
                 }
-                self.programs.insert(name.to_owned(), program);
-                let program = self.programs.get(&name).unwrap();
-                if program.config.autostart {
-                    self.start_command(vec![name]);
-                }
+                self.programs.insert(name, program);
             }
         }
         // 4. If some programs disapeared we stop the concerned procs and do not track them anymore

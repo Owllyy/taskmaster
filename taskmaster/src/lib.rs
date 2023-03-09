@@ -44,10 +44,6 @@ impl Taskmaster {
                     continue;
                 }
             };
-            // Todo rework Exit instruction
-            if let Instruction::Exit = instruction {
-                process::exit(0);
-            }
             if let Err(_) = sender.send(instruction) {
                 eprintln!("Failed to execute instruction");
             }
