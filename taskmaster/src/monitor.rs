@@ -278,9 +278,11 @@ impl Monitor {
                     Ok(code) => {
                         if let Some(code) = code {
                             if let Some(signal) = code.signal() {
-                                self.logger.log(&format!("Processus {} {} was stopped by a signal: {}", processus.name, processus.id, signal));
-                                instructions.push(Instruction::ResetProcessus(processus.id));
-                                continue;
+                                if processus.status != Status::Reloading {
+                                    self.logger.log(&format!("Processus {} {} was stopped by a signal: {}", processus.name, processus.id, signal));
+                                    instructions.push(Instruction::ResetProcessus(processus.id));
+                                    continue;
+                                }
                             }
                         }
                         if let Some(instruction) = Self::monitor_processus(self.programs.get(&processus.name).unwrap(), processus, code) {
