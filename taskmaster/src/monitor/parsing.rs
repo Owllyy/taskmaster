@@ -13,16 +13,18 @@ pub struct Config {
     pub numprocs: usize,
     #[serde(deserialize_with = "umask_deserialize")]
     pub umask: u32,
-    pub workingdir: String,
+    #[serde(deserialize_with = "workingdir_deserialize")]
+    pub workingdir: PathBuf,
     pub autostart: bool,
+    #[serde(deserialize_with = "autorestart_deserialize")]
     pub autorestart: String,
     pub exitcodes: Vec<i32>,
     pub startretries: usize,
     pub starttime: usize,
     pub stopsignal: Signal,
     pub stoptime: usize,
-    pub stdout: String,
-    pub stderr: String,
+    pub stdout: PathBuf,
+    pub stderr: PathBuf,
     pub env: HashMap<String, String>,
 }
 
@@ -30,6 +32,25 @@ fn umask_deserialize<'de, D>(deserializer: D) -> Result<u32, D::Error> where D: 
     let buf = String::deserialize(deserializer)?;
 
     buf.parse::<u32>().map_err(serde::de::Error::custom)
+}
+
+fn workingdir_deserialize<'de, D>(deserializer: D) -> Result<PathBuf, D::Error> where D: Deserializer<'de> {
+    let buf = PathBuf::deserialize(deserializer)?;
+
+    if !buf.is_dir() {
+        Err(format!("Invalid working directory: {}", buf.to_str().unwrap())).map_err(serde::de::Error::custom)
+    } else {
+        Ok(buf)
+    }
+}
+
+fn autorestart_deserialize<'de, D>(deserializer: D) -> Result<String, D::Error> where D: Deserializer<'de> {
+    let buf = String::deserialize(deserializer)?;
+
+    match buf.as_str() {
+        "always" | "Always" | "never" | "Never" | "unexpected" | "Unexpected" => Ok(buf),
+        _ => Err("Invalid autostart parameter: always, never, unexpected").map_err(serde::de::Error::custom)
+    }
 }
 
 #[derive(Deserialize)]
