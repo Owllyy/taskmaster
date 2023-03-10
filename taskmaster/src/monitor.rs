@@ -8,7 +8,7 @@ use std::error::Error;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Sender, Receiver};
-use std::{thread, vec};
+use std::{thread, vec, process};
 use std::time::Duration;
 use std::path::PathBuf;
 use std::process::ExitStatus;
@@ -383,11 +383,12 @@ impl Monitor {
 
     fn stop_all(&mut self) {
         let mut to_stop = Vec::new();
+        self.logger.log("Shutting down taskmaster");
         for (name, _) in self.programs.iter() {
             to_stop.push(name.to_owned());
         }
         self.stop_command(to_stop);
-        while let Some(proc) = self.processus.iter().find(|e| e.child.is_some()) {
+        while let Some(_) = self.processus.iter().find(|e| e.child.is_some()) {
             for instruction in self.monitor() {
                 match instruction {
                     Instruction::ResetProcessus(id) => self.reset_processus(id),
@@ -396,6 +397,7 @@ impl Monitor {
                 }
             }
         }
+        process::exit(0);
     }
     
     fn reload(&mut self) {
