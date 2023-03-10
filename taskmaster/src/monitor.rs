@@ -12,13 +12,14 @@ use std::{thread, vec, process};
 use std::time::Duration;
 use std::path::PathBuf;
 use std::process::ExitStatus;
+use std::os::unix::process::ExitStatusExt;
 use processus::{Status, Processus};
 use logger::Logger;
 use program::Program;
 use parsing::Parsing;
 use instruction::Instruction;
 
-use crate::signal::Signal;
+use crate::signal::{Signal, self};
 use crate::sys::{Libc, self};
 
 use self::processus::id::Id;
@@ -103,6 +104,19 @@ impl Monitor {
 }
 
 impl Monitor {
+
+    fn is_retry_start(program: &Program, processus: &Processus, exit_code: ExitStatus) -> bool {
+        if program.config.autorestart != "never" {
+            let is_normal_exit_code = program.config.exitcodes.iter().find(|&&e| e == exit_code.code().expect("Failed to get exit code"));
+            if is_normal_exit_code == None || program.config.autorestart == "always" {
+                if processus.retries > 0 {
+                    return true
+                }
+            }
+        }
+        false
+    }
+
     fn get_processus(processus: &mut Vec<Processus>, id: Id) -> Option<&mut Processus> {
         processus.iter_mut().find(|processus| processus.id == id)
     }
@@ -187,12 +201,9 @@ impl Monitor {
     fn monitor_active_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
         match exit_code {
             Some(code) => {
-                if (program.config.autorestart == "unexpected"
-                && program.config.exitcodes.iter().find(|&&e| e == code.code().expect("Failed to get exit code")) == None)
-                || program.config.autorestart == "always" {
-                    return Some(Instruction::StartProcessus(processus.id))
-                } else {
-                    return Some(Instruction::ResetProcessus(processus.id))
+                match Self::is_retry_start(program, processus, code) {
+                    true => {return Some(Instruction::StartProcessus(processus.id))},
+                    false => {return Some(Instruction::ResetProcessus(processus.id))},
                 }
             },
             _ => {return None},
@@ -207,12 +218,9 @@ impl Monitor {
     fn monitor_starting_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
         match exit_code {
             Some(code) => {
-                if ((program.config.autorestart == "always")
-                || (program.config.autorestart == "unexpected"
-                && program.config.exitcodes.iter().find(|&&e| e == code.code().expect("Failed to get exit code")) == None)) && processus.retries > 0 {
-                    Some(Instruction::RetryStartProcessus(processus.id))
-                } else {
-                    Some(Instruction::ResetProcessus(processus.id))
+                match Self::is_retry_start(program, processus, code) {
+                    true => {Some(Instruction::RetryStartProcessus(processus.id))},
+                    false => {Some(Instruction::ResetProcessus(processus.id))},
                 }
             },
             None => {
@@ -271,8 +279,15 @@ impl Monitor {
             if let Some(child) = processus.child.as_mut() {
                 match child.try_wait() {
                     Err(_) => panic!("Try_wait failed on processus {} {}", processus.id, processus.name),
-                    e => {
-                        if let Some(instruction) = Self::monitor_processus(self.programs.get(&processus.name).unwrap(), processus, e.unwrap()) {
+                    Ok(code) => {
+                        if let Some(code) = code {
+                            if let Some(signal) = code.signal() {
+                                self.logger.log(&format!("Processus {} {} was stopped by a signal: {}", processus.name, processus.id, signal));
+                                instructions.push(Instruction::ResetProcessus(processus.id));
+                                continue;
+                            }
+                        }
+                        if let Some(instruction) = Self::monitor_processus(self.programs.get(&processus.name).unwrap(), processus, code) {
                             instructions.push(instruction);
                         }
                     },
