@@ -1,4 +1,5 @@
 use std::env;
+use std::error::Error;
 use std::process;
 use std::path::{PathBuf};
 
@@ -11,20 +12,39 @@ pub fn get_config_from_args() -> PathBuf {
         _ => { eprintln!("Taskmaster: Missing config file name"); process::exit(1);},
     };
     
-    match path.try_exists() {
-        Ok(true) => {},
-        _ => { eprintln!("Taskmaster: Config file : Does not exist"); process::exit(1);}
-    }
-    if !path.is_file() {
-        eprintln!("Taskmaster: Config file : Is not a file"); 
+    if let Err(err) = check_file_with_extension(&path, "conf") {
+        eprintln!("Taskmaster: Config path: {err}");
         process::exit(1);
-    }
-    match path.extension() {
-        Some(x) => { if x != "conf" {
-            eprintln!("Taskmaster: Config file : Bad extention"); process::exit(1);
-        }},
-        None => { eprintln!("Taskmaster: Config file : Bad extention"); process::exit(1);}
     }
 
     path
-} 
+}
+
+pub fn check_valid_path(path: &PathBuf) -> Result<(), Box<dyn Error>> {
+    match path.try_exists() {
+        Ok(true) => Ok(()),
+        _ => Err("Path does not point to an existing entity".into()),
+    }
+}
+
+pub fn check_is_file(path: &PathBuf) -> Result<(), Box<dyn Error>> {
+    check_valid_path(path)?;
+    if !path.is_file() {
+        Err("File does not exist or is not accessible".into())
+    } else {
+        Ok(())
+    }
+}
+
+pub fn check_file_with_extension(path: &PathBuf, extension: &str) -> Result<(), Box<dyn Error>> {
+    check_is_file(path)?;
+    match path.extension() {
+        Some(x) => if x != extension {
+            Err("Wrong file extension")
+        } else {
+            Ok(())
+        }
+        None => Err("Failed to retreive file extension"),
+    }?;
+    Ok(())
+}

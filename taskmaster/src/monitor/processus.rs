@@ -75,7 +75,7 @@ impl Processus {
     }
 
     pub fn start_child(&mut self, command: &mut Command, start_retries: usize, mask: u32) -> Result<bool, Box<dyn Error>> {
-        if self.retries <= 0 {
+        if self.retries == 0 {
             self.status = Status::Inactive;
             self.retries = start_retries;
             self.child = None;
