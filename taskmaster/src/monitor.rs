@@ -112,7 +112,7 @@ impl Monitor {
 
         if let Some(processus) = processus{
             if let Some(child) = &mut processus.child {
-                child.kill();
+                child.kill().ok();
             }
             if processus.status != Status::Reloading(true | false) {
                 processus.status = Status::Inactive;
@@ -189,7 +189,7 @@ impl Monitor {
             Some(code) => {
                 if (program.config.autorestart == "unexpected"
                 && program.config.exitcodes.iter().find(|&&e| e == code.code().expect("Failed to get exit code")) == None)
-                || program.config.autorestart == "true" {
+                || program.config.autorestart == "always" {
                     return Some(Instruction::StartProcessus(processus.id))
                 } else {
                     return Some(Instruction::ResetProcessus(processus.id))
@@ -207,7 +207,7 @@ impl Monitor {
     fn monitor_starting_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
         match exit_code {
             Some(code) => {
-                if ((program.config.autorestart == "true")
+                if ((program.config.autorestart == "always")
                 || (program.config.autorestart == "unexpected"
                 && program.config.exitcodes.iter().find(|&&e| e == code.code().expect("Failed to get exit code")) == None)) && processus.retries > 0 {
                     Some(Instruction::RetryStartProcessus(processus.id))
