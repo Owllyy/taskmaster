@@ -19,14 +19,14 @@ use program::Program;
 use parsing::Parsing;
 use instruction::Instruction;
 
-use crate::signal::{Signal, self};
+use crate::signal::{Signal};
 use crate::sys::{Libc, self};
 
 use self::processus::id::Id;
 
 const INACTIVE_FLAG: &str = "Inactive";
 
-fn sig_handler(sig: i32) {
+fn sig_handler(_: i32) {
     sys::RELOAD_INSTRUCTION.store(true, Ordering::SeqCst);
 }
 
@@ -62,7 +62,7 @@ impl Monitor {
     }
 
     pub fn execute(&mut self, receiver: Receiver<Instruction>, mut sender: Sender<Instruction>) {
-        if let Err(_) = Libc::signal(Signal::SIGHUP, sig_handler) {
+        if Libc::signal(Signal::SIGHUP, sig_handler).is_err() {
             eprintln!("Signal function failed, taskmaster won't be able to handle SIGHUP");
         }
         self.autostart();
@@ -108,16 +108,14 @@ impl Monitor {
     fn is_retry_start(program: &Program, processus: &Processus, exit_code: ExitStatus) -> bool {
         if program.config.autorestart != "never" {
             let is_normal_exit_code = program.config.exitcodes.iter().find(|&&e| e == exit_code.code().expect("Failed to get exit code"));
-            if is_normal_exit_code == None || program.config.autorestart == "always" {
-                if processus.retries > 0 {
-                    return true
-                }
+            if (is_normal_exit_code.is_none() || program.config.autorestart == "always") && processus.retries > 0 {
+                return true
             }
         }
         false
     }
 
-    fn get_processus(processus: &mut Vec<Processus>, id: Id) -> Option<&mut Processus> {
+    fn get_processus(processus: &mut [Processus], id: Id) -> Option<&mut Processus> {
         processus.iter_mut().find(|processus| processus.id == id)
     }
 
@@ -149,7 +147,7 @@ impl Monitor {
                     match processus.start_child(command, program.config.startretries, program.config.umask) {
                         Ok(false) => {self.logger.log(&format!("Starting processus {} {}, {} atempt left", processus.name, processus.id, processus.retries));},
                         Ok(true) => {self.logger.log(&format!("Failed to start processus {} {}, no atempt left", processus.name, processus.id));},
-                        Err(err) => {eprintln!("{:?}", err);self.logger.log(&format!("{:?}", err));},
+                        Err(err) => {eprintln!("{err:?}");self.logger.log(&format!("{err:?}"));},
                     } 
                 } else {
                     eprintln!("Can't find command to start processus {} {}", processus.name, processus.id);
@@ -174,7 +172,7 @@ impl Monitor {
         if let Some(processus) = Self::get_processus(&mut self.processus, id) {
             let processus_name = processus.name.to_owned();
             self.processus.retain(|proc| proc.id != id);
-            if self.processus.iter().filter(|e| e.name == processus_name).collect::<Vec<&Processus>>().len() == 0 {
+            if self.processus.iter().filter(|e| e.name == processus_name).collect::<Vec<&Processus>>().is_empty() {
                 // remove old one anyway
                 self.programs.remove(&processus_name);
                 // if there is with inactive flag do stuff
@@ -202,11 +200,11 @@ impl Monitor {
         match exit_code {
             Some(code) => {
                 match Self::is_retry_start(program, processus, code) {
-                    true => {return Some(Instruction::StartProcessus(processus.id))},
-                    false => {return Some(Instruction::ResetProcessus(processus.id))},
+                    true => {Some(Instruction::StartProcessus(processus.id))},
+                    false => {Some(Instruction::ResetProcessus(processus.id))},
                 }
             },
-            _ => {return None},
+            _ => {None},
         }
         
     }
@@ -262,14 +260,13 @@ impl Monitor {
     }
 
     fn monitor_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
-        let tmp = match processus.status {
+        match processus.status {
             Status::Active => Self::monitor_active_processus(program, processus, exit_code),
             Status::Inactive => {Self::monitor_inactive_processus(processus); None},
             Status::Starting => Self::monitor_starting_processus(program, processus, exit_code),
             Status::Stoping => Self::monitor_stoping_processus(program, processus, exit_code),
             Status::Reloading(is_remove) => Self::monitor_remove_processus(program, processus, exit_code, is_remove),
-        };
-        tmp
+        }
     }
 
     fn monitor(&mut self) -> Vec<Instruction> {
@@ -311,10 +308,10 @@ impl Monitor {
     fn start_command(&mut self, names: Vec<String>) {
         for name in names {
             self.logger.log(&format!("Starting program {}", &name));
-            if let None = self.programs.get_mut(&name) {
-                eprintln!("Program not found: {}", name);
+            if self.programs.get_mut(&name).is_none() {
+                eprintln!("Program not found: {name}");
                 continue;
-            };
+            }
             let filtered_processus_ids: Vec<Id> = self.processus.iter().filter_map(|e| {
                 if e.name == name && e.status == Status::Inactive {
                     Some(e.id)
@@ -333,7 +330,7 @@ impl Monitor {
             let program = if let Some(program) = self.programs.get_mut(&name) {
                 program
             } else {
-                eprintln!("Program not found: {}", name);
+                eprintln!("Program not found: {name}");
                 continue;
             };
             for processus in self.processus.iter_mut().filter(|e| e.name == name) {
@@ -351,7 +348,7 @@ impl Monitor {
                 },
                 Ok(None) => {
                     if let Err(err) = processus.stop_child(program.config.stopsignal, program.config.startretries) {
-                        eprintln!("{}", err.to_string());
+                        eprintln!("{err}");
                     }
                 }
                 Err(_) => {
@@ -363,19 +360,16 @@ impl Monitor {
 
     fn restart_command(&mut self, names: Vec<String>, sender: &mut Sender<Instruction>) {
         for name in &names {
-            match self.programs.get(name) {
-                None => {
-                    eprintln!("Program not found: {}", name);
-                    return ;
-            },
-                _ => {},
+            if self.programs.get(name).is_none() {
+                eprintln!("Program not found: {name}");
+                return ;
             }
         }
 
         self.stop_command(names.to_owned());
         
-        for name in names.to_owned() {
-            self.logger.log(&format!("Restarting {}", name));
+        for name in names {
+            self.logger.log(&format!("Restarting {name}"));
             let duration = Duration::new(self.programs.get(&name).expect("program not found").config.stoptime as u64, 0);
             let sender = sender.clone();
             thread::spawn(move || {
@@ -389,7 +383,7 @@ impl Monitor {
         let mut to_start: Vec<String> = Vec::new();
         for (name, program) in self.programs.iter() {
             if program.config.autostart {
-                self.logger.log(&format!("Autostart {}", name));
+                self.logger.log(&format!("Autostart {name}"));
                 to_start.push(name.to_owned());
             }
         }
@@ -403,7 +397,7 @@ impl Monitor {
             to_stop.push(name.to_owned());
         }
         self.stop_command(to_stop);
-        while let Some(_) = self.processus.iter().find(|e| e.child.is_some()) {
+        while self.processus.iter().any(|e| e.child.is_some()) {
             for instruction in self.monitor() {
                 match instruction {
                     Instruction::ResetProcessus(id) => self.reset_processus(id),
@@ -420,7 +414,7 @@ impl Monitor {
         let new_programs = match Parsing::parse(&self.config_file_path) {
             Ok(programs) => programs,
             Err(err) => {
-                self.logger.log(&format!("Failed to reload config file: {}", err));
+                self.logger.log(&format!("Failed to reload config file: {err}"));
                 return;
             }
         };
@@ -441,12 +435,12 @@ impl Monitor {
         for (name, mut program) in new_programs {
             if self.programs.contains_key(&name) {
                 // 2. Check all progs and if the conf hasn't changed do nothing
-                if self.programs.iter().filter(|e| e.0 == &name).next().unwrap().1.config == program.config {
+                if self.programs.iter().find(|e| e.0 == &name).unwrap().1.config == program.config {
                     continue;
                 } else {
                     // 3. If something has changed then restart the procs with the new config
                     if let Err(err) = program.build_command() {
-                        eprintln!("Program {}: {}", name, err.to_string());
+                        eprintln!("Program {name}: {err}");
                         continue;
                     }
                     self.stop_command(vec!(name.to_owned()));
@@ -459,7 +453,7 @@ impl Monitor {
             } else {
                 // 4. If some new programs appeared we start tracking them and start if necessery
                 if let Err(err) = program.build_command() {
-                    eprintln!("Program {}: {}", name, err.to_string());
+                    eprintln!("Program {name}: {err}");
                     continue;
                 }
                 for _ in 0..program.config.numprocs {
