@@ -10,7 +10,7 @@ pub enum Instruction {
     Stop(Vec<String>),
     Restart(Vec<String>),
     Reload,
-    RemoveProcessus(Id, bool),
+    RemoveProcessus(Id),
     StartProcessus(Id),
     ResetProcessus(Id),
     RetryStartProcessus(Id),
@@ -23,7 +23,7 @@ impl FromStr for Instruction {
     type Err = Box<dyn Error>;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut parts = s.trim().split_whitespace();
+        let mut parts = s.split_whitespace();
         let command_name = parts.next().ok_or("Empty instruction")?;
         match command_name {
             "exit" | "Exit" => Ok(Instruction::Exit),

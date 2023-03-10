@@ -24,6 +24,6 @@ impl Logger {
     }
 
     pub fn log(&mut self, msg: &str) {
-        writeln!(self.output, "{}", msg);
+        writeln!(self.output, "{msg}").ok();
     }
 }

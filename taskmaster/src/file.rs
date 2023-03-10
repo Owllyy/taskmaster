@@ -6,7 +6,7 @@ pub fn get_config_from_args() -> PathBuf {
     let args: Vec<String> = env::args().collect();
     let mut path: PathBuf = PathBuf::new();
     match args.len() {
-        2 => path.push(args[1].to_owned()),
+        2 => path.push(&args[1]),
         3.. => { eprintln!("Taskmaster: Too many arguments"); process::exit(1);},
         _ => { eprintln!("Taskmaster: Missing config file name"); process::exit(1);},
     };

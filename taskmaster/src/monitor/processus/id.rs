@@ -15,8 +15,7 @@ impl fmt::Display for Id {
 
 impl Default for Id {
     fn default() -> Self {
-        let id_value;
-        id_value = ID.load(Ordering::SeqCst);
+        let id_value = ID.load(Ordering::SeqCst);
         ID.store(id_value + 1, Ordering::SeqCst);
         Self {
             value: id_value,

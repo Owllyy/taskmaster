@@ -6,7 +6,7 @@ use monitor::*;
 use monitor::instruction::*;
 use std::io::{self};
 use std::sync::mpsc::{self, Sender};
-use std::{process, thread};
+use std::{thread};
 use std::error::Error;
 use std::path::PathBuf;
 
@@ -39,18 +39,18 @@ impl Taskmaster {
             io::stdin().read_line(&mut buff).expect("Failed to read");
             let instruction: Instruction = match buff.parse() {
                 Ok(res) => res,
-                Err(e) => {
-                    eprintln!("{}", e.to_string());
+                Err(err) => {
+                    eprintln!("{err}");
                     continue;
                 }
             };
             if let Instruction::Exit = instruction {
-                if let Err(_) = sender.send(instruction) {
+                if sender.send(instruction).is_err() {
                     eprintln!("Failed to execute instruction");
                 }
-                loop {}
+                loop {std::thread::sleep(std::time::Duration::from_secs(100));}
             }
-            if let Err(_) = sender.send(instruction) {
+            if sender.send(instruction).is_err() {
                 eprintln!("Failed to execute instruction");
             }
         }

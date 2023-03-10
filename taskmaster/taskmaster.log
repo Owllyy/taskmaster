@@ -1,23 +1,23 @@
-Autostart infinito
 Autostart infinity
-Starting program infinito
-Starting processus infinito   0  , 2 atempt left
-Starting processus infinito   1  , 2 atempt left
+Autostart infinito
 Starting program infinity
-Starting processus infinity   2  , 2 atempt left
-Starting processus infinity   3  , 2 atempt left
-Displaying Status
-Displaying Status
-Seting status of processus infinito   0   to Active
-Seting status of processus infinito   1   to Active
-Seting status of processus infinity   2   to Active
-Seting status of processus infinity   3   to Active
-Displaying Status
-Processus infinito   1   was stopped by a signal: 15
-Reset processus infinito   1  
-Displaying Status
+Starting processus infinity   0  , 2 atempt left
+Starting processus infinity   1  , 2 atempt left
 Starting program infinito
-Starting processus infinito   1  , 2 atempt left
+Starting processus infinito   2  , 2 atempt left
+Starting processus infinito   3  , 2 atempt left
 Displaying Status
-Seting status of processus infinito   1   to Active
+Displaying Status
+Seting status of processus infinity   0   to Active
+Seting status of processus infinity   1   to Active
+Seting status of processus infinito   2   to Active
+Seting status of processus infinito   3   to Active
+Stoping infinito
+Processus infinito   2   was stopped by a signal: 15
+Processus infinito   3   was stopped by a signal: 15
+Reset processus infinito   2  
+Reset processus infinito   3  
+Displaying Status
+Reloading config file
+Displaying Status
 Displaying Status

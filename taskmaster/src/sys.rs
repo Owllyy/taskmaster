@@ -19,11 +19,10 @@ pub struct Libc;
 impl Libc {
     pub fn umask(command: &mut Command, mask: u32) -> Result<Child, Box<dyn Error>> {
         let old_mask: u32;
-        let child;
         unsafe {
             old_mask = umask(mask);
         }
-        child = command.spawn()?;
+        let child = command.spawn()?;
         unsafe {
             umask(old_mask);
         }

@@ -44,7 +44,7 @@ impl Program {
     }
 
     pub fn prefix_name(prefix: &str, name: String) -> String {
-        format!("{}{}", prefix, name)
+        format!("{prefix}{name}")
     }
 
     fn fd_setup(&self) -> Result<(Stdio, Stdio), Box<dyn Error>> {

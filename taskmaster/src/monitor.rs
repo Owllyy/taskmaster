@@ -45,7 +45,7 @@ impl Monitor {
 
         for (name, program) in programs.iter_mut() {
             if let Err(err) = program.build_command() {
-                eprintln!("Program {}: {}", name, err.to_string());
+                eprintln!("Program {name}: {err}");
                 continue;
             }
             for _ in 0..program.config.numprocs {
@@ -86,7 +86,7 @@ impl Monitor {
                     Instruction::Restart(programs) => self.restart_command(programs, &mut sender),
                     Instruction::Reload => self.reload(),
                     // Instruction not from Cli
-                    Instruction::RemoveProcessus(id, is_remove) => self.remove_processus(id, is_remove),
+                    Instruction::RemoveProcessus(id) => self.remove_processus(id),
                     Instruction::StartProcessus(id) => self.start_processus(id),
                     Instruction::ResetProcessus(id) => self.reset_processus(id),
                     Instruction::RetryStartProcessus(id) => self.start_processus(id),
@@ -126,7 +126,7 @@ impl Monitor {
             if let Some(child) = &mut processus.child {
                 child.kill().ok();
             }
-            if processus.status != Status::Reloading(true | false) {
+            if processus.status != Status::Reloading {
                 processus.status = Status::Inactive;
             }
             self.logger.log(&format!("Sigkill processus {} {}", processus.name, processus.id));
@@ -167,8 +167,7 @@ impl Monitor {
         }
     }
 
-    // Need rework logic problem
-    fn remove_processus(&mut self, id: Id, is_remove: bool) {
+    fn remove_processus(&mut self, id: Id) {
         if let Some(processus) = Self::get_processus(&mut self.processus, id) {
             let processus_name = processus.name.to_owned();
             self.processus.retain(|proc| proc.id != id);
@@ -244,10 +243,10 @@ impl Monitor {
         }
     }
 
-    fn monitor_remove_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>, is_remove: bool) -> Option<Instruction> {
+    fn monitor_remove_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
         match exit_code {
             Some(_) => {
-                Some(Instruction::RemoveProcessus(processus.id, is_remove))
+                Some(Instruction::RemoveProcessus(processus.id))
             }
             None => {
                 if processus.is_timeout(program.config.stoptime) {
@@ -265,7 +264,7 @@ impl Monitor {
             Status::Inactive => {Self::monitor_inactive_processus(processus); None},
             Status::Starting => Self::monitor_starting_processus(program, processus, exit_code),
             Status::Stoping => Self::monitor_stoping_processus(program, processus, exit_code),
-            Status::Reloading(is_remove) => Self::monitor_remove_processus(program, processus, exit_code, is_remove),
+            Status::Reloading => Self::monitor_remove_processus(program, processus, exit_code),
         }
     }
 
@@ -429,7 +428,7 @@ impl Monitor {
         self.stop_command(to_remove.to_owned());
         for name in &to_remove {
             for proc in self.processus.iter_mut().filter(|e| &e.name == name) {
-                proc.status = Status::Reloading(true);
+                proc.status = Status::Reloading;
             }
         }
         for (name, mut program) in new_programs {
@@ -445,7 +444,7 @@ impl Monitor {
                     }
                     self.stop_command(vec!(name.to_owned()));
                     for proc in self.processus.iter_mut().filter(|e| e.name == name) {
-                        proc.status = Status::Reloading(false);
+                        proc.status = Status::Reloading;
                     }
                     program.deactivate();
                     self.programs.insert(Program::prefix_name(INACTIVE_FLAG, name), program);
