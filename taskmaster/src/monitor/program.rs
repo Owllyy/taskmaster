@@ -48,12 +48,12 @@ impl Program {
     }
 
     fn fd_setup(&self) -> Result<(Stdio, Stdio), Box<dyn Error>> {
-        let stdout = if !self.config.stdout.is_file() {
+        let stdout = if self.config.stdout.as_os_str().is_empty() {
             Stdio::null()
         } else {
             Stdio::from(File::create(&self.config.stdout)?)
         };
-        let stderr = if !self.config.stderr.is_file() {
+        let stderr = if self.config.stderr.as_os_str().is_empty() {
             Stdio::null()
         } else {
             Stdio::from(File::create(&self.config.stderr)?)

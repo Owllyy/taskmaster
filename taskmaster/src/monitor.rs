@@ -290,6 +290,8 @@ impl Monitor {
                         }
                     },
                 };
+            } else if processus.status == Status::Reloading {
+                instructions.push(Instruction::RemoveProcessus(processus.id));
             }
         }
         instructions
