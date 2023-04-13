@@ -29,7 +29,6 @@ impl Libc {
         match child {
             Err(x) => Err(Box::new(x)),
             Ok(child) => Ok(child),
-
         }
     }
 

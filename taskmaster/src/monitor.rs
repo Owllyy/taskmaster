@@ -43,14 +43,19 @@ impl Monitor {
         let logger = Logger::new("taskmaster.log")?;
         let mut processus: Vec<Processus> = Vec::new();
 
+        let mut invalid_confs = Vec::<String>::new();
         for (name, program) in programs.iter_mut() {
             if let Err(err) = program.build_command() {
                 eprintln!("Program {name}: {err}");
+                invalid_confs.push(name.to_owned());
                 continue;
             }
             for _ in 0..program.config.numprocs {
                 processus.push(Processus::new(name, program));
             }
+        }
+        for name in &invalid_confs {
+            programs.remove(name);
         }
         
         Ok(Monitor {
