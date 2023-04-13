@@ -92,9 +92,9 @@ impl Monitor {
                     Instruction::Reload => self.reload(),
                     // Instruction not from Cli
                     Instruction::RemoveProcessus(id) => self.remove_processus(id),
-                    Instruction::StartProcessus(id) => self.start_processus(id),
+                    Instruction::StartProcessus(id) => self.start_processus(id, false),
                     Instruction::ResetProcessus(id) => self.reset_processus(id),
-                    Instruction::RetryStartProcessus(id) => self.start_processus(id),
+                    Instruction::RetryStartProcessus(id) => self.start_processus(id, true),
                     Instruction::SetStatus(id, status) => self.set_status(id, status),
                     Instruction::KillProcessus(id) => self.kill_processus(id),
                     Instruction::Exit => self.stop_all(),
@@ -136,11 +136,11 @@ impl Monitor {
         }
     }
 
-    fn start_processus(&mut self, id: Id) {
+    fn start_processus(&mut self, id: Id, restart: bool) {
         if let Some(processus) = Self::get_processus(&mut self.processus, id) {
             if let Some(program) = self.programs.get_mut(&processus.name) {
                 if let Some(command) = &mut program.command {
-                    match processus.start_child(command, program.config.startretries, program.config.umask) {
+                    match processus.start_child(command, program.config.startretries, program.config.umask, restart) {
                         Ok(false) => {self.logger.log(&format!("Starting processus {} {}, {} atempt left", processus.name, processus.id, processus.retries));},
                         Ok(true) => {self.logger.log(&format!("Failed to start processus {} {}, no atempt left", processus.name, processus.id));},
                         Err(err) => {eprintln!("{err:?}");self.logger.log(&format!("{err:?}"));},
@@ -326,7 +326,7 @@ impl Monitor {
                 }
             }).collect();
             for pid in filtered_processus_ids {
-                self.start_processus(pid);
+                self.start_processus(pid, false);
             }
         }
     }

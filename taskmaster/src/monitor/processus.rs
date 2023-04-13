@@ -74,15 +74,17 @@ impl Processus {
         Ok(())
     }
 
-    pub fn start_child(&mut self, command: &mut Command, start_retries: usize, mask: u32) -> Result<bool, Box<dyn Error>> {
-        if self.retries == 0 {
+    pub fn start_child(&mut self, command: &mut Command, start_retries: usize, mask: u32, restart: bool) -> Result<bool, Box<dyn Error>> {
+        if restart && self.retries == 0 {
             self.status = Status::Inactive;
             self.retries = start_retries;
             self.child = None;
             Ok(true)
         } else {
             self.status = Status::Starting;
-            self.retries -= 1;
+            if restart {
+                self.retries -= 1;
+            }
             self.child = Some(Libc::umask(command, mask).map_err(|err| {
                 self.reset_child(start_retries);
                 format!("Child {} spawn failed: {err}", self.name)})?);
