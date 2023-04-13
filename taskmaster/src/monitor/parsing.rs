@@ -30,8 +30,8 @@ pub struct Config {
 
 fn umask_deserialize<'de, D>(deserializer: D) -> Result<u32, D::Error> where D: Deserializer<'de> {
     let buf = String::deserialize(deserializer)?;
-
-    buf.parse::<u32>().map_err(serde::de::Error::custom)
+    
+    u32::from_str_radix(&buf.parse::<String>().unwrap(), 8).map_err(serde::de::Error::custom)
 }
 
 fn workingdir_deserialize<'de, D>(deserializer: D) -> Result<PathBuf, D::Error> where D: Deserializer<'de> {
