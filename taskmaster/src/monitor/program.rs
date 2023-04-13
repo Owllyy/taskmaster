@@ -19,7 +19,7 @@ impl Program {
     pub fn build_command(&mut self) -> Result<(), Box<dyn Error>> {
         let mut parts = self.config.cmd.split_whitespace();
         let program_name = parts.next().ok_or("Missing program name")?;
-        let output = self.fd_setup()?;
+        let output = self.fd_setup().map_err(|err| format!("Failed to parse std's: {err}"))?;
         self.command = Some(Command::new(program_name));
 
         self.command.as_mut().unwrap().args(parts)
@@ -51,12 +51,12 @@ impl Program {
         let stdout = if self.config.stdout.as_os_str().is_empty() {
             Stdio::null()
         } else {
-            Stdio::from(File::create(&self.config.stdout)?)
+            Stdio::from(File::create(&self.config.stdout).map_err(|err| format!("stdout = '{}' {}", self.config.stdout.display(), err))?)
         };
         let stderr = if self.config.stderr.as_os_str().is_empty() {
             Stdio::null()
         } else {
-            Stdio::from(File::create(&self.config.stderr)?)
+            Stdio::from(File::create(&self.config.stderr).map_err(|err| format!("stderr = '{}' {}", self.config.stderr.display(), err))?)
         };
 
         Ok((stdout, stderr))
