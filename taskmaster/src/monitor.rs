@@ -131,6 +131,7 @@ impl Monitor {
             if let Some(child) = &mut processus.child {
                 child.kill().ok();
             }
+            processus.child = None;
             if processus.status != Status::Reloading {
                 processus.status = Status::Inactive;
             }
