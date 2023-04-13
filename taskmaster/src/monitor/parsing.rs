@@ -48,7 +48,7 @@ fn autorestart_deserialize<'de, D>(deserializer: D) -> Result<String, D::Error> 
     let buf = String::deserialize(deserializer)?;
 
     match buf.as_str() {
-        "always" | "Always" | "never" | "Never" | "unexpected" | "Unexpected" => Ok(buf),
+        "always" | "never" | "unexpected" => Ok(buf),
         _ => Err("Invalid autostart parameter: always, never, unexpected").map_err(serde::de::Error::custom)
     }
 }

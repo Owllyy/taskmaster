@@ -110,16 +110,6 @@ impl Monitor {
 
 impl Monitor {
 
-    fn is_retry_start(program: &Program, processus: &Processus, exit_code: ExitStatus) -> bool {
-        if program.config.autorestart != "never" {
-            let is_normal_exit_code = program.config.exitcodes.iter().find(|&&e| e == exit_code.code().expect("Failed to get exit code"));
-            if (is_normal_exit_code.is_none() || program.config.autorestart == "always") && processus.retries > 0 {
-                return true
-            }
-        }
-        false
-    }
-
     fn get_processus(processus: &mut [Processus], id: Id) -> Option<&mut Processus> {
         processus.iter_mut().find(|processus| processus.id == id)
     }
@@ -178,9 +168,7 @@ impl Monitor {
             let processus_name = processus.name.to_owned();
             self.processus.retain(|proc| proc.id != id);
             if self.processus.iter().filter(|e| e.name == processus_name).collect::<Vec<&Processus>>().is_empty() {
-                // remove old one anyway
                 self.programs.remove(&processus_name);
-                // if there is with inactive flag do stuff
                 let name = if let Some((name, _)) = self.programs.iter().find(|e| e.0 == &[INACTIVE_FLAG, &processus_name].concat()) {
                     name.to_owned()
                 } else {
@@ -204,14 +192,22 @@ impl Monitor {
     fn monitor_active_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
         match exit_code {
             Some(code) => {
-                match Self::is_retry_start(program, processus, code) {
-                    true => {Some(Instruction::StartProcessus(processus.id))},
-                    false => {Some(Instruction::ResetProcessus(processus.id))},
+                match program.config.autorestart.as_str() {
+                    "always" => {Some(Instruction::StartProcessus(processus.id))},
+                    "never" => {Some(Instruction::ResetProcessus(processus.id))},
+                    "unexpected" => {
+                        let is_normal_exit_code = program.config.exitcodes.iter().find(|&&e| e == code.code().expect("Failed to get exit code"));
+                        if is_normal_exit_code.is_none() {
+                            Some(Instruction::StartProcessus(processus.id))
+                        } else {
+                            Some(Instruction::ResetProcessus(processus.id))
+                        }
+                    },
+                    _ => {panic!("autorestart has an invalid value");}
                 }
             },
             _ => {None},
         }
-        
     }
 
     fn monitor_inactive_processus(processus: &Processus) {
@@ -220,10 +216,11 @@ impl Monitor {
 
     fn monitor_starting_processus(program: &Program, processus: &Processus, exit_code: Option<ExitStatus>) -> Option<Instruction> {
         match exit_code {
-            Some(code) => {
-                match Self::is_retry_start(program, processus, code) {
-                    true => {Some(Instruction::RetryStartProcessus(processus.id))},
-                    false => {Some(Instruction::ResetProcessus(processus.id))},
+            Some(_) => {
+                if processus.retries > 0 {
+                    Some(Instruction::RetryStartProcessus(processus.id))
+                } else {
+                    Some(Instruction::ResetProcessus(processus.id))
                 }
             },
             None => {
