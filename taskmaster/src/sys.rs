@@ -22,11 +22,15 @@ impl Libc {
         unsafe {
             old_mask = umask(mask);
         }
-        let child = command.spawn()?;
+        let child = command.spawn();
         unsafe {
             umask(old_mask);
         }
-        Ok(child)
+        match child {
+            Err(x) => Err(Box::new(x)),
+            Ok(child) => Ok(child),
+
+        }
     }
 
     pub fn kill(child: &mut Option<Child>, sig: Signal) -> Result<(), Box<dyn Error>> {
