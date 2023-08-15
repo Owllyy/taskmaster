@@ -1,19 +1,75 @@
-Autostart program
-Starting program program
-Starting processus program   0  , 3 atempt left
-Starting processus program   1  , 3 atempt left
-Starting processus program   2  , 3 atempt left
-Seting status of processus program   0   to Active
-Seting status of processus program   1   to Active
-Seting status of processus program   2   to Active
+Autostart infinito
+Autostart infinity
+Starting program infinito
+Starting processus infinito   0  , 3 atempt left
+Starting processus infinito   1  , 3 atempt left
+Starting program infinity
+Starting processus infinity   2  , 3 atempt left
+Starting processus infinity   3  , 3 atempt left
 Displaying Status
-Stoping program
-Processus program   0   was stopped by a signal: 15
-Processus program   1   was stopped by a signal: 15
-Processus program   2   was stopped by a signal: 15
-Reset processus program   0  
-Reset processus program   1  
-Reset processus program   2  
+Seting status of processus infinito   0   to Active
+Seting status of processus infinito   1   to Active
+Seting status of processus infinity   2   to Active
+Seting status of processus infinity   3   to Active
+Displaying Status
+Stoping infinito
+Processus infinito   0   was stopped by a signal: 15
+Processus infinito   1   was stopped by a signal: 15
+Reset processus infinito   0  
+Reset processus infinito   1  
+Displaying Status
+Displaying Status
+Reloading config file
+Stoping infinity
+Starting program infinity
+Starting processus infinity   4  , 3 atempt left
+Starting processus infinity   5  , 3 atempt left
+Seting status of processus infinity   4   to Active
+Seting status of processus infinity   5   to Active
+Displaying Status
+Reloading config file
+Stoping infinito
+Starting program infinito
+Starting processus infinito   6  , 3 atempt left
+Starting processus infinito   7  , 3 atempt left
+Seting status of processus infinito   6   to Active
+Seting status of processus infinito   7   to Active
+Displaying Status
+Displaying Status
+Stoping infinity
+Processus infinity   4   was stopped by a signal: 15
+Processus infinity   5   was stopped by a signal: 15
+Reset processus infinity   4  
+Reset processus infinity   5  
+Displaying Status
+Displaying Status
+Reloading config file
+Stoping infinity
+Starting program infinity
+Starting processus infinity   8  , 3 atempt left
+Starting processus infinity   9  , 3 atempt left
+Seting status of processus infinity   8   to Active
+Seting status of processus infinity   9   to Active
+Displaying Status
+Stoping infinity
+Processus infinity   8   was stopped by a signal: 15
+Processus infinity   9   was stopped by a signal: 15
+Reset processus infinity   8  
+Reset processus infinity   9  
+Displaying Status
+Reloading config file
+Stoping infinito
+Starting program infinito
+Starting processus infinito  10  , 3 atempt left
+Starting processus infinito  11  , 3 atempt left
+Displaying Status
+Seting status of processus infinito  10   to Active
+Seting status of processus infinito  11   to Active
 Displaying Status
 Shutting down taskmaster
-Stoping program
+Stoping infinito
+Stoping infinity
+Processus infinito  10   was stopped by a signal: 15
+Reset processus infinito  10  
+Processus infinito  11   was stopped by a signal: 15
+Reset processus infinito  11  
