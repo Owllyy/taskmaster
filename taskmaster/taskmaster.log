@@ -1,6 +1,19 @@
 Autostart program
 Starting program program
 Starting processus program   0  , 3 atempt left
+Starting processus program   1  , 3 atempt left
+Starting processus program   2  , 3 atempt left
 Seting status of processus program   0   to Active
-Reset processus program   0  
+Seting status of processus program   1   to Active
+Seting status of processus program   2   to Active
 Displaying Status
+Stoping program
+Processus program   0   was stopped by a signal: 15
+Processus program   1   was stopped by a signal: 15
+Processus program   2   was stopped by a signal: 15
+Reset processus program   0  
+Reset processus program   1  
+Reset processus program   2  
+Displaying Status
+Shutting down taskmaster
+Stoping program
